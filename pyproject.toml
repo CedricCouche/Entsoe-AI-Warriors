@@ -1,0 +1,18 @@
+[project]
+name = "entsoe-ai-warriors"
+version = "0.1.0"
+description = "ENTSO-E energy data analysis with AI/ML"
+requires-python = ">=3.12"
+dependencies = [
+    "entsoe-py",
+    "plotly",
+    "python-dotenv",
+    "streamlit",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/entsoe_ai_warriors"]
