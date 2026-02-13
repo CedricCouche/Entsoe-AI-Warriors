@@ -21,13 +21,12 @@ logger = logging.getLogger(__name__)
 
 # Shared state for the background thread (module-level, survives Streamlit reruns)
 _refresh_lock = threading.Lock()
-_last_refresh: datetime | None = None
 _refresh_in_progress = False
 
 
 def _refresh_loop() -> None:
     """Background loop: collect fresh data every 15 minutes."""
-    global _last_refresh, _refresh_in_progress
+    global _refresh_in_progress
     while True:
         try:
             with _refresh_lock:
@@ -36,9 +35,8 @@ def _refresh_loop() -> None:
             collect_data()
             st.cache_data.clear()
             with _refresh_lock:
-                _last_refresh = datetime.now(UTC)
                 _refresh_in_progress = False
-            logger.info("Data refresh completed at %s", _last_refresh)
+            logger.info("Data refresh completed")
         except Exception:
             with _refresh_lock:
                 _refresh_in_progress = False
@@ -153,26 +151,18 @@ crossborder = load_crossborder()
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 
 st.sidebar.header("Data Refresh")
-with _refresh_lock:
-    last = _last_refresh
-    in_progress = _refresh_in_progress
-if last is not None:
-    st.sidebar.text(f"Last refresh: {last:%Y-%m-%d %H:%M} UTC")
+# Show file-based last download time (survives app restarts)
+_price_csv = DATA_DIR / "france_day_ahead_prices.csv"
+if _price_csv.exists():
+    _file_mtime = datetime.fromtimestamp(_price_csv.stat().st_mtime, tz=UTC)
+    st.sidebar.text(f"Last data download:\n{_file_mtime:%Y-%m-%d %H:%M} UTC")
 else:
-    st.sidebar.text("Last refresh: not yet")
+    st.sidebar.text("Last data download: no data yet")
+with _refresh_lock:
+    in_progress = _refresh_in_progress
 if in_progress:
     st.sidebar.info("Refresh in progress...")
-if st.sidebar.button("Refresh now"):
-    with st.spinner("Fetching data from ENTSO-E..."):
-        try:
-            collect_data()
-            st.cache_data.clear()
-            with _refresh_lock:
-                _last_refresh = datetime.now(UTC)
-            st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Refresh failed: {e}")
-
+st.sidebar.caption("Data auto-refreshes every 15 min.")
 st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 

@@ -23,7 +23,11 @@ Entsoe-AI-Warriors — ENTSO-E (European Network of Transmission System Operator
 |------|---------|
 | `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper |
 | `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France |
-| `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard |
+| `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard (with background auto-refresh) |
+
+### Background data refresh
+
+The dashboard spawns a daemon thread that calls `collect_france.main()` every 15 minutes to keep CSV data fresh. The sidebar displays the last download timestamp (based on CSV file modification time). The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
 
 ### Dependencies
 
