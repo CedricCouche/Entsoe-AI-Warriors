@@ -1,5 +1,9 @@
 """Streamlit dashboard for France ENTSO-E energy data."""
 
+import logging
+import threading
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +11,47 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from entsoe_ai_warriors.collect_france import main as collect_data
+
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+
+REFRESH_INTERVAL_SECONDS = 15 * 60  # 15 minutes
+
+logger = logging.getLogger(__name__)
+
+# Shared state for the background thread (module-level, survives Streamlit reruns)
+_refresh_lock = threading.Lock()
+_last_refresh: datetime | None = None
+_refresh_in_progress = False
+
+
+def _refresh_loop() -> None:
+    """Background loop: collect fresh data every 15 minutes."""
+    global _last_refresh, _refresh_in_progress
+    while True:
+        try:
+            with _refresh_lock:
+                _refresh_in_progress = True
+            logger.info("Starting data refresh from ENTSO-E API...")
+            collect_data()
+            st.cache_data.clear()
+            with _refresh_lock:
+                _last_refresh = datetime.now(UTC)
+                _refresh_in_progress = False
+            logger.info("Data refresh completed at %s", _last_refresh)
+        except Exception:
+            with _refresh_lock:
+                _refresh_in_progress = False
+            logger.exception("Data refresh failed")
+        time.sleep(REFRESH_INTERVAL_SECONDS)
+
+
+def _ensure_refresh_thread() -> None:
+    """Start the background refresh thread once per process."""
+    if "refresh_thread_started" not in st.session_state:
+        thread = threading.Thread(target=_refresh_loop, daemon=True)
+        thread.start()
+        st.session_state.refresh_thread_started = True
 
 NEIGHBOURS = ["BE", "CH", "DE_LU", "ES", "GB", "IT_NORD"]
 NEIGHBOUR_LABELS = {
@@ -94,6 +138,7 @@ def filter_by_date(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> 
 # ── Page config ─────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="France Energy Dashboard", page_icon="⚡", layout="wide")
+_ensure_refresh_thread()
 st.title("⚡ France Energy Dashboard — ENTSO-E Data")
 
 # ── Load all data ───────────────────────────────────────────────────────────
@@ -107,6 +152,28 @@ crossborder = load_crossborder()
 
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 
+st.sidebar.header("Data Refresh")
+with _refresh_lock:
+    last = _last_refresh
+    in_progress = _refresh_in_progress
+if last is not None:
+    st.sidebar.text(f"Last refresh: {last:%Y-%m-%d %H:%M} UTC")
+else:
+    st.sidebar.text("Last refresh: not yet")
+if in_progress:
+    st.sidebar.info("Refresh in progress...")
+if st.sidebar.button("Refresh now"):
+    with st.spinner("Fetching data from ENTSO-E..."):
+        try:
+            collect_data()
+            st.cache_data.clear()
+            with _refresh_lock:
+                _last_refresh = datetime.now(UTC)
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Refresh failed: {e}")
+
+st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 
 all_dates = prices.index
