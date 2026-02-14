@@ -68,7 +68,7 @@ pio.templates.default = "retro_70s"
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-REFRESH_INTERVAL_SECONDS = 15 * 60  # 15 minutes
+REFRESH_INTERVAL_SECONDS = 60 * 60  # 1 hour
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ with _refresh_lock:
     in_progress = _refresh_in_progress
 if in_progress:
     st.sidebar.info("Refresh in progress...")
-st.sidebar.caption("Data auto-refreshes every 15 min.")
+st.sidebar.caption("Data auto-refreshes every hour.")
 st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 
@@ -317,9 +317,9 @@ f_crossborder = {nb: filter_by_date(df, start_dt, end_dt) for nb, df in crossbor
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 
-tab_overview, tab_load, tab_gen, tab_capacity, tab_windsolar = st.tabs([
+tab_overview, tab_load, tab_gen, tab_capacity, tab_windsolar, tab_crossborder = st.tabs([
     "⚡ Overview", "🔌 Load Details", "🏭 Generation Details",
-    "🔋 Installed Capacity", "🌿 Wind & Solar Details",
+    "🔋 Installed Capacity", "🌿 Wind & Solar Details", "🔀 Cross-Border Details",
 ])
 
 # ── Tab 1: Overview ─────────────────────────────────────────────────────────
@@ -825,6 +825,141 @@ with tab_windsolar:
         daily_ws_df = pd.DataFrame(daily_ws_rows).pivot(index="Date", columns="Source", values="GWh")
         daily_ws_df["Total"] = daily_ws_df.sum(axis=1).round(2)
         st.dataframe(daily_ws_df, width="stretch")
+
+    st.markdown("---")
+    st.caption("Data source: ENTSO-E Transparency Platform • Dashboard built with Streamlit & Plotly")
+
+# ── Tab 6: Cross-Border Details ──────────────────────────────────────────────
+
+with tab_crossborder:
+
+    # ── Net Imports Over Time (larger) ────────────────────────────────────
+
+    st.header("🔀 Net Imports Over Time")
+
+    fig_cb_detail = go.Figure()
+    for nb in NEIGHBOURS:
+        df_nb = f_crossborder[nb]
+        label = NEIGHBOUR_LABELS.get(nb, nb)
+        fig_cb_detail.add_trace(go.Scatter(
+            x=df_nb.index, y=df_nb["Net Import"], name=label, mode="lines",
+        ))
+    fig_cb_detail.add_hline(y=0, line_dash="dash", line_color="#1B2A4A", line_width=1)
+    fig_cb_detail.update_layout(
+        yaxis_title="MW (positive = import)", hovermode="x unified", height=500,
+    )
+    st.plotly_chart(fig_cb_detail, width="stretch", theme=None)
+
+    # ── Import & Export per Neighbour (3x2 grid) ─────────────────────────
+
+    st.header("📊 Import & Export per Neighbour")
+
+    for row_start in range(0, len(NEIGHBOURS), 3):
+        row_nbs = NEIGHBOURS[row_start:row_start + 3]
+        cols = st.columns(len(row_nbs))
+        for col, nb in zip(cols, row_nbs):
+            with col:
+                label = NEIGHBOUR_LABELS.get(nb, nb)
+                st.subheader(label)
+                df_nb = f_crossborder[nb]
+                fig_nb = go.Figure()
+                fig_nb.add_trace(go.Scatter(
+                    x=df_nb.index, y=df_nb["Import"], name="Import", mode="lines",
+                    line=dict(color="#568203"),
+                ))
+                fig_nb.add_trace(go.Scatter(
+                    x=df_nb.index, y=df_nb["Export"], name="Export", mode="lines",
+                    line=dict(color="#CC5500"),
+                ))
+                fig_nb.add_trace(go.Scatter(
+                    x=df_nb.index, y=df_nb["Net Import"], name="Net Import", mode="lines",
+                    line=dict(color="#1B2A4A", dash="dash"),
+                ))
+                fig_nb.update_layout(
+                    yaxis_title="MW", hovermode="x unified", height=350,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                )
+                st.plotly_chart(fig_nb, width="stretch", theme=None)
+
+    # ── Daily Net Import by Neighbour (stacked bar) ──────────────────────
+
+    st.header("📅 Daily Net Import by Neighbour")
+
+    daily_net_rows = []
+    for nb in NEIGHBOURS:
+        df_nb = f_crossborder[nb]
+        daily_net = df_nb["Net Import"].resample("D").sum() * 0.25 / 1000  # GWh
+        label = NEIGHBOUR_LABELS.get(nb, nb)
+        for date, val in daily_net.items():
+            daily_net_rows.append({"Date": date, "Neighbour": label, "Net Import (GWh)": val})
+
+    if daily_net_rows:
+        daily_net_df = pd.DataFrame(daily_net_rows)
+        fig_daily_net = px.bar(
+            daily_net_df, x="Date", y="Net Import (GWh)", color="Neighbour",
+            barmode="relative",
+        )
+        fig_daily_net.update_layout(hovermode="x unified", height=500)
+        st.plotly_chart(fig_daily_net, width="stretch", theme=None)
+
+    # ── Total Energy Exchanged (grouped bar) ─────────────────────────────
+
+    st.header("⚡ Total Energy Exchanged")
+
+    exchange_rows = []
+    for nb in NEIGHBOURS:
+        df_nb = f_crossborder[nb]
+        label = NEIGHBOUR_LABELS.get(nb, nb)
+        imp_gwh = df_nb["Import"].sum() * 0.25 / 1000
+        exp_gwh = df_nb["Export"].sum() * 0.25 / 1000
+        exchange_rows.append({"Neighbour": label, "Direction": "Import", "GWh": imp_gwh})
+        exchange_rows.append({"Neighbour": label, "Direction": "Export", "GWh": exp_gwh})
+
+    if exchange_rows:
+        exchange_df = pd.DataFrame(exchange_rows)
+        fig_exchange = px.bar(
+            exchange_df, x="GWh", y="Neighbour", color="Direction",
+            orientation="h", barmode="group",
+            color_discrete_map={"Import": "#568203", "Export": "#CC5500"},
+        )
+        fig_exchange.update_layout(height=400, hovermode="y unified")
+        st.plotly_chart(fig_exchange, width="stretch", theme=None)
+
+    # ── Statistics ────────────────────────────────────────────────────────
+
+    st.header("📊 Cross-Border Statistics")
+
+    # Compute per-neighbour totals
+    nb_net_gwh = {}
+    for nb in NEIGHBOURS:
+        df_nb = f_crossborder[nb]
+        label = NEIGHBOUR_LABELS.get(nb, nb)
+        nb_net_gwh[label] = (df_nb["Import"].sum() - df_nb["Export"].sum()) * 0.25 / 1000
+
+    total_net_gwh = sum(nb_net_gwh.values())
+    largest_importer = max(nb_net_gwh, key=nb_net_gwh.get)
+    largest_exporter = min(nb_net_gwh, key=nb_net_gwh.get)
+
+    cbk1, cbk2, cbk3 = st.columns(3)
+    cbk1.metric("Total Net Import", f"{total_net_gwh:+.1f} GWh")
+    cbk2.metric("Largest Net Importer", f"{largest_importer} ({nb_net_gwh[largest_importer]:+.1f} GWh)")
+    cbk3.metric("Largest Net Exporter", f"{largest_exporter} ({nb_net_gwh[largest_exporter]:+.1f} GWh)")
+
+    # Daily summary table
+    st.subheader("Daily Net Import Summary (GWh)")
+
+    daily_summary_rows = []
+    for nb in NEIGHBOURS:
+        df_nb = f_crossborder[nb]
+        label = NEIGHBOUR_LABELS.get(nb, nb)
+        daily_net = df_nb["Net Import"].resample("D").sum() * 0.25 / 1000
+        for date, val in daily_net.items():
+            daily_summary_rows.append({"Date": date.strftime("%Y-%m-%d"), "Neighbour": label, "GWh": round(val, 2)})
+
+    if daily_summary_rows:
+        daily_cb_df = pd.DataFrame(daily_summary_rows).pivot(index="Date", columns="Neighbour", values="GWh")
+        daily_cb_df["Total"] = daily_cb_df.sum(axis=1).round(2)
+        st.dataframe(daily_cb_df, width="stretch")
 
     st.markdown("---")
     st.caption("Data source: ENTSO-E Transparency Platform • Dashboard built with Streamlit & Plotly")
