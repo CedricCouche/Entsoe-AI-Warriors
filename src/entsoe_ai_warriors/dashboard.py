@@ -53,6 +53,13 @@ RETRO_TEMPLATE = go.layout.Template(
     ),
 )
 
+SOURCE_COLORS = {
+    "Solar": "#9B30FF",                          # Bright violet
+    "Hydro Pumped Storage": "#1E90FF",            # Dodger blue
+    "Hydro Run-of-river and poundage": "#4169E1", # Royal blue
+    "Hydro Water Reservoir": "#00BFFF",           # Deep sky blue
+}
+
 pio.templates["retro_70s"] = RETRO_TEMPLATE
 pio.templates.default = "retro_70s"
 
@@ -365,7 +372,8 @@ with gen_col1:
     st.subheader("Generation Over Time")
     fig_gen = go.Figure()
     for col in f_gen.columns:
-        fig_gen.add_trace(go.Scatter(x=f_gen.index, y=f_gen[col], name=col, stackgroup="one", mode="lines"))
+        color = SOURCE_COLORS.get(col)
+        fig_gen.add_trace(go.Scatter(x=f_gen.index, y=f_gen[col], name=col, stackgroup="one", mode="lines", line=dict(color=color) if color else None))
     fig_gen.update_layout(yaxis_title="MW", hovermode="x unified")
     st.plotly_chart(fig_gen, width="stretch", theme=None)
 
@@ -387,10 +395,11 @@ with ren_col1:
     st.subheader("Wind & Solar: Forecast vs Actual")
     fig_ren = go.Figure()
     for src in ["Solar", "Wind Onshore", "Wind Offshore"]:
+        color = SOURCE_COLORS.get(src)
         if src in f_gen.columns:
-            fig_ren.add_trace(go.Scatter(x=f_gen.index, y=f_gen[src], name=f"{src} (actual)", mode="lines"))
+            fig_ren.add_trace(go.Scatter(x=f_gen.index, y=f_gen[src], name=f"{src} (actual)", mode="lines", line=dict(color=color) if color else None))
         if src in f_forecast.columns:
-            fig_ren.add_trace(go.Scatter(x=f_forecast.index, y=f_forecast[src], name=f"{src} (forecast)", mode="lines", line=dict(dash="dash")))
+            fig_ren.add_trace(go.Scatter(x=f_forecast.index, y=f_forecast[src], name=f"{src} (forecast)", mode="lines", line=dict(dash="dash", color=color) if color else dict(dash="dash")))
     fig_ren.update_layout(yaxis_title="MW", hovermode="x unified")
     st.plotly_chart(fig_ren, width="stretch", theme=None)
 

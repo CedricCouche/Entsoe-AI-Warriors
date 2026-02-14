@@ -31,6 +31,19 @@ This skill defines a 1970-1980 retro visual theme for Plotly charts and Streamli
 | Orange | `#CC7A2E` | Sidebar background |
 | Navy Blue | `#1B2A4A` | Text, axis lines, legend border |
 
+### Source-Specific Colors
+
+Certain energy sources have fixed colors overriding the default colorway:
+
+| Source | Color | Hex |
+|--------|-------|-----|
+| Solar | Bright Violet | `#9B30FF` |
+| Hydro Pumped Storage | Dodger Blue | `#1E90FF` |
+| Hydro Run-of-river and poundage | Royal Blue | `#4169E1` |
+| Hydro Water Reservoir | Deep Sky Blue | `#00BFFF` |
+
+These are applied via a `SOURCE_COLORS` dictionary and passed as `line=dict(color=...)` when creating traces.
+
 ## Typography
 - **Headings font:** Abril Fatface (Google Font) — inspired by Cooper Black, the quintessential 1970s display typeface
 - **Body font:** EB Garamond (Google Font) — warm classic serif
