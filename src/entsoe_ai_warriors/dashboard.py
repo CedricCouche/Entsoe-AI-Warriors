@@ -9,9 +9,54 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 
 from entsoe_ai_warriors.collect_france import main as collect_data
+
+# ── 1970s Retro Theme ────────────────────────────────────────────────────────
+
+RETRO_COLORS = [
+    "#CC5500",  # Burnt Orange
+    "#568203",  # Avocado Green
+    "#E1AD01",  # Mustard Yellow
+    "#DA9100",  # Harvest Gold
+    "#8B4513",  # Saddle Brown
+    "#A0522D",  # Sienna
+    "#556B2F",  # Dark Olive
+    "#CD853F",  # Peru
+]
+
+RETRO_TEMPLATE = go.layout.Template(
+    layout=go.Layout(
+        font=dict(family="'EB Garamond', Georgia, 'Times New Roman', serif", color="#1B2A4A"),
+        title=dict(font=dict(size=18)),
+        paper_bgcolor="#FFF8DC",
+        plot_bgcolor="#F5E8C8",
+        colorway=RETRO_COLORS,
+        xaxis=dict(
+            gridcolor="rgba(59,37,7,0.15)",
+            linecolor="#1B2A4A",
+            zerolinecolor="rgba(27,42,74,0.3)",
+        ),
+        yaxis=dict(
+            gridcolor="rgba(59,37,7,0.15)",
+            linecolor="#1B2A4A",
+            zerolinecolor="rgba(27,42,74,0.3)",
+        ),
+        legend=dict(bgcolor="rgba(255,248,220,0.8)", bordercolor="#1B2A4A", borderwidth=1),
+    ),
+    data=dict(
+        scatter=[go.Scatter(line=dict(width=2.5))],
+        bar=[go.Bar(marker=dict(line=dict(width=0.5, color="#1B2A4A")))],
+        pie=[go.Pie(marker=dict(line=dict(width=1, color="#FFF8DC")))],
+    ),
+)
+
+pio.templates["retro_70s"] = RETRO_TEMPLATE
+pio.templates.default = "retro_70s"
+
+# ── Constants ────────────────────────────────────────────────────────────────
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -137,7 +182,57 @@ def filter_by_date(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> 
 # ── Page config ─────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="France Energy Dashboard", page_icon="⚡", layout="wide")
-st.title("⚡ France Energy Dashboard — ENTSO-E Data")
+
+st.markdown(
+    '<link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">',
+    unsafe_allow_html=True,
+)
+
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #FFF8DC;
+        font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
+    }
+    [data-testid="stSidebar"] {
+        background-color: #CC7A2E;
+    }
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+    .stApp [data-testid="stHeading"] h1,
+    .stApp [data-testid="stHeading"] h2,
+    .stApp [data-testid="stHeading"] h3,
+    .stApp [data-testid="stHeading"] h4,
+    .stApp .stMarkdown h1, .stApp .stMarkdown h2,
+    .stApp .stMarkdown h3, .stApp .stMarkdown h4 {
+        font-family: 'Abril Fatface', Georgia, 'Times New Roman', serif !important;
+        color: #1B2A4A;
+    }
+    .stApp p, .stApp span, .stApp label, .stApp .stCaption {
+        font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
+        color: #1B2A4A;
+    }
+    [data-testid="stMetricValue"] {
+        color: #CC5500;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #1B2A4A;
+    }
+    /* Remove white frame around Plotly charts */
+    .stPlotlyChart, [data-testid="stPlotlyChart"],
+    .stPlotlyChart > div, [data-testid="stPlotlyChart"] > div,
+    .stPlotlyChart iframe, [data-testid="stPlotlyChart"] iframe {
+        background-color: transparent !important;
+    }
+    .js-plotly-plot .plotly .main-svg {
+        background: transparent !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown(
+    '<h1 style="font-family: \'Abril Fatface\', Georgia, serif; color: #1B2A4A;">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
+    unsafe_allow_html=True,
+)
 
 # ── Initial data collection if CSVs are missing ────────────────────────────
 
@@ -248,7 +343,7 @@ st.header("📈 Day-Ahead Prices")
 
 fig_prices = px.line(f_prices.reset_index(), x="timestamp", y="Price", labels={"Price": "EUR/MWh", "timestamp": ""})
 fig_prices.update_layout(hovermode="x unified")
-st.plotly_chart(fig_prices, width="stretch")
+st.plotly_chart(fig_prices, width="stretch", theme=None)
 
 # ── Section 2: Load ────────────────────────────────────────────────────────
 
@@ -258,7 +353,7 @@ fig_load = go.Figure()
 fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load["Actual Load"], name="Actual Load", mode="lines"))
 fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load["Forecasted Load"], name="Forecasted Load", mode="lines", line=dict(dash="dash")))
 fig_load.update_layout(yaxis_title="MW", hovermode="x unified")
-st.plotly_chart(fig_load, width="stretch")
+st.plotly_chart(fig_load, width="stretch", theme=None)
 
 # ── Section 3: Generation Mix ──────────────────────────────────────────────
 
@@ -272,7 +367,7 @@ with gen_col1:
     for col in f_gen.columns:
         fig_gen.add_trace(go.Scatter(x=f_gen.index, y=f_gen[col], name=col, stackgroup="one", mode="lines"))
     fig_gen.update_layout(yaxis_title="MW", hovermode="x unified")
-    st.plotly_chart(fig_gen, width="stretch")
+    st.plotly_chart(fig_gen, width="stretch", theme=None)
 
 with gen_col2:
     st.subheader("Average Share by Source")
@@ -280,7 +375,7 @@ with gen_col2:
     avg_gen = avg_gen[avg_gen > 0].sort_values(ascending=False)
     fig_donut = px.pie(values=avg_gen.values, names=avg_gen.index, hole=0.4)
     fig_donut.update_traces(textposition="inside", textinfo="percent+label")
-    st.plotly_chart(fig_donut, width="stretch")
+    st.plotly_chart(fig_donut, width="stretch", theme=None)
 
 # ── Section 4: Renewables ──────────────────────────────────────────────────
 
@@ -297,14 +392,14 @@ with ren_col1:
         if src in f_forecast.columns:
             fig_ren.add_trace(go.Scatter(x=f_forecast.index, y=f_forecast[src], name=f"{src} (forecast)", mode="lines", line=dict(dash="dash")))
     fig_ren.update_layout(yaxis_title="MW", hovermode="x unified")
-    st.plotly_chart(fig_ren, width="stretch")
+    st.plotly_chart(fig_ren, width="stretch", theme=None)
 
 with ren_col2:
     st.subheader("Installed Capacity by Technology")
     cap = capacity.iloc[0] if len(capacity) > 0 else pd.Series(dtype=float)
     cap = cap[cap > 0].sort_values(ascending=True)
     fig_cap = px.bar(x=cap.values, y=cap.index, orientation="h", labels={"x": "MW", "y": ""})
-    st.plotly_chart(fig_cap, width="stretch")
+    st.plotly_chart(fig_cap, width="stretch", theme=None)
 
 # ── Section 5: Cross-Border Flows ──────────────────────────────────────────
 
@@ -320,7 +415,7 @@ with cb_col1:
         label = NEIGHBOUR_LABELS.get(nb, nb)
         fig_cb.add_trace(go.Scatter(x=df_nb.index, y=df_nb["Net Import"], name=label, mode="lines"))
     fig_cb.update_layout(yaxis_title="MW", hovermode="x unified")
-    st.plotly_chart(fig_cb, width="stretch")
+    st.plotly_chart(fig_cb, width="stretch", theme=None)
 
 with cb_col2:
     st.subheader("Total Energy Exchanged")
