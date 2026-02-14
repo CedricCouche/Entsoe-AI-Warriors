@@ -29,7 +29,7 @@ def get_client() -> EntsoePandasClient:
 
 def default_period() -> tuple[pd.Timestamp, pd.Timestamp]:
     """Return a default period: last 7 days."""
-    end = pd.Timestamp(datetime.now(UTC), tz="Europe/Paris")
+    end = pd.Timestamp(datetime.now(UTC)).tz_convert("Europe/Paris")
     start = end - timedelta(days=7)
     return start, end
 
