@@ -4,11 +4,14 @@ version = "0.1.0"
 description = "ENTSO-E energy data analysis with AI/ML"
 requires-python = ">=3.12"
 dependencies = [
-    "entsoe-py",
-    "plotly",
-    "python-dotenv",
-    "streamlit",
+    "entsoe-py>=0.7",
+    "plotly>=6.0",
+    "python-dotenv>=1.0",
+    "streamlit>=1.30",
 ]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
 
 [build-system]
 requires = ["hatchling"]

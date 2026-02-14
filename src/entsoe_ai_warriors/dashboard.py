@@ -70,39 +70,16 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 REFRESH_INTERVAL_SECONDS = 60 * 60  # 1 hour
 
+# Energy conversion: 15-min interval MW readings to GWh
+INTERVAL_HOURS = 0.25  # 15 minutes expressed in hours
+MW_TO_GWH = INTERVAL_HOURS / 1000  # multiply sum of MW values by this to get GWh
+
 logger = logging.getLogger(__name__)
 
 # Shared state for the background thread (module-level, survives Streamlit reruns)
 _refresh_lock = threading.Lock()
 _refresh_in_progress = False
-
-
-def _refresh_loop() -> None:
-    """Background loop: collect fresh data every 15 minutes."""
-    global _refresh_in_progress
-    while True:
-        try:
-            with _refresh_lock:
-                _refresh_in_progress = True
-            logger.info("Starting data refresh from ENTSO-E API...")
-            collect_data()
-            st.cache_data.clear()
-            with _refresh_lock:
-                _refresh_in_progress = False
-            logger.info("Data refresh completed")
-        except Exception:
-            with _refresh_lock:
-                _refresh_in_progress = False
-            logger.exception("Data refresh failed")
-        time.sleep(REFRESH_INTERVAL_SECONDS)
-
-
-def _ensure_refresh_thread() -> None:
-    """Start the background refresh thread once per process."""
-    if "refresh_thread_started" not in st.session_state:
-        thread = threading.Thread(target=_refresh_loop, daemon=True)
-        thread.start()
-        st.session_state.refresh_thread_started = True
+_refresh_last_error: str | None = None
 
 NEIGHBOURS = ["BE", "CH", "DE_LU", "ES", "GB", "IT_NORD"]
 NEIGHBOUR_LABELS = {
@@ -117,6 +94,56 @@ NEIGHBOUR_LABELS = {
 RENEWABLE_TYPES = {"Solar", "Wind Offshore", "Wind Onshore", "Hydro Run-of-river and poundage", "Hydro Water Reservoir"}
 NUCLEAR_TYPES = {"Nuclear"}
 
+# Column name schema — single source of truth for expected CSV columns
+COL_PRICE = "Price"
+COL_ACTUAL_LOAD = "Actual Load"
+COL_FORECAST_LOAD = "Forecasted Load"
+COL_IMPORT = "Import"
+COL_EXPORT = "Export"
+COL_NET_IMPORT = "Net Import"
+
+
+def _refresh_loop() -> None:
+    """Background loop: collect fresh data every hour."""
+    global _refresh_in_progress, _refresh_last_error
+    while True:
+        try:
+            with _refresh_lock:
+                _refresh_in_progress = True
+                _refresh_last_error = None
+            logger.info("Starting data refresh from ENTSO-E API...")
+            collect_data()
+            with _refresh_lock:
+                _refresh_in_progress = False
+            st.cache_data.clear()
+            logger.info("Data refresh completed")
+        except Exception as exc:
+            with _refresh_lock:
+                _refresh_in_progress = False
+                _refresh_last_error = str(exc)
+            logger.exception("Data refresh failed")
+        time.sleep(REFRESH_INTERVAL_SECONDS)
+
+
+def _ensure_refresh_thread() -> None:
+    """Start the background refresh thread once per process."""
+    if "refresh_thread_started" not in st.session_state:
+        thread = threading.Thread(target=_refresh_loop, daemon=True)
+        thread.start()
+        st.session_state.refresh_thread_started = True
+
+
+def _safe_pct(numerator: float, denominator: float) -> float:
+    """Compute percentage safely, returning 0 if denominator is zero or NaN."""
+    if pd.notna(denominator) and denominator > 0:
+        return numerator / denominator * 100
+    return 0.0
+
+
+def _to_gwh(mw_sum: float) -> float:
+    """Convert a sum of MW values (from 15-min interval data) to GWh."""
+    return mw_sum * MW_TO_GWH
+
 
 # ── Data loading ────────────────────────────────────────────────────────────
 
@@ -124,8 +151,10 @@ NUCLEAR_TYPES = {"Nuclear"}
 @st.cache_data
 def load_prices() -> pd.DataFrame:
     df = pd.read_csv(DATA_DIR / "france_day_ahead_prices.csv", index_col=0, parse_dates=True)
-    df.columns = ["Price"]
+    df.columns = [COL_PRICE]
     df.index.name = "timestamp"
+    if df.empty:
+        raise ValueError("Price data is empty")
     return df
 
 
@@ -133,6 +162,11 @@ def load_prices() -> pd.DataFrame:
 def load_load() -> pd.DataFrame:
     df = pd.read_csv(DATA_DIR / "france_load.csv", index_col=0, parse_dates=True)
     df.index.name = "timestamp"
+    for col in (COL_ACTUAL_LOAD, COL_FORECAST_LOAD):
+        if col not in df.columns:
+            raise ValueError(f"Load data missing expected column: {col}")
+    if df.empty:
+        raise ValueError("Load data is empty")
     return df
 
 
@@ -142,8 +176,12 @@ def load_generation() -> pd.DataFrame:
     df.index.name = "timestamp"
     # Keep only "Actual Aggregated" columns and flatten
     agg_cols = [(t, sub) for t, sub in df.columns if sub == "Actual Aggregated"]
+    if not agg_cols:
+        raise ValueError("Generation data has no 'Actual Aggregated' columns — CSV format may have changed")
     df_agg = df[agg_cols].copy()
     df_agg.columns = [t for t, _ in df_agg.columns]
+    if df_agg.empty:
+        raise ValueError("Generation data is empty after filtering")
     return df_agg
 
 
@@ -169,10 +207,10 @@ def load_crossborder() -> dict[str, pd.DataFrame]:
         import_path = DATA_DIR / f"france_crossborder_{nb}_to_FR.csv"
         exp = pd.read_csv(export_path, index_col=0, parse_dates=True)
         imp = pd.read_csv(import_path, index_col=0, parse_dates=True)
-        exp.columns = ["Export"]
-        imp.columns = ["Import"]
+        exp.columns = [COL_EXPORT]
+        imp.columns = [COL_IMPORT]
         combined = imp.join(exp, how="outer")
-        combined["Net Import"] = combined["Import"] - combined["Export"]
+        combined[COL_NET_IMPORT] = combined[COL_IMPORT] - combined[COL_EXPORT]
         combined.index.name = "timestamp"
         flows[nb] = combined
     return flows
@@ -182,7 +220,7 @@ def load_crossborder() -> dict[str, pd.DataFrame]:
 
 
 def filter_by_date(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    mask = (df.index >= start) & (df.index <= end)
+    mask = (df.index >= start) & (df.index < end)
     return df.loc[mask]
 
 
@@ -247,6 +285,7 @@ _required_csv = DATA_DIR / "france_day_ahead_prices.csv"
 if not _required_csv.exists():
     with st.status("Collecting initial data from ENTSO-E API...", expanded=True) as status:
         st.write("First launch detected — downloading 7 days of data. This may take a few minutes.")
+        st.write("Make sure `ENTSOE_API_KEY` is set in your `.env` file or Streamlit secrets.")
         try:
             collect_data()
             st.cache_data.clear()
@@ -254,6 +293,7 @@ if not _required_csv.exists():
         except Exception as e:
             status.update(label="Data collection failed", state="error")
             st.error(f"Could not collect data: {e}")
+            st.info("Check that `ENTSOE_API_KEY` is set in `.env` and that you have network access to the ENTSO-E API.")
             st.stop()
 
 _ensure_refresh_thread()
@@ -267,8 +307,8 @@ try:
     forecast = load_wind_solar_forecast()
     capacity = load_installed_capacity()
     crossborder = load_crossborder()
-except FileNotFoundError as e:
-    st.error(f"Data files not found: {e}")
+except (FileNotFoundError, ValueError) as e:
+    st.error(f"Data loading failed: {e}")
     st.info("Please ensure the ENTSO-E API key is configured and data has been collected.")
     st.stop()
 
@@ -284,8 +324,11 @@ else:
     st.sidebar.text("Last data download: no data yet")
 with _refresh_lock:
     in_progress = _refresh_in_progress
+    last_error = _refresh_last_error
 if in_progress:
     st.sidebar.info("Refresh in progress...")
+if last_error:
+    st.sidebar.warning(f"Last refresh failed: {last_error}")
 st.sidebar.caption("Data auto-refreshes every hour.")
 st.sidebar.markdown("---")
 st.sidebar.header("Filters")
@@ -301,12 +344,13 @@ date_range = st.sidebar.date_input(
     max_value=max_date,
 )
 
+# Use exclusive end boundary (start of next day) for cleaner filtering
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start_dt = pd.Timestamp(date_range[0], tz=all_dates.tz)
-    end_dt = pd.Timestamp(date_range[1], tz=all_dates.tz) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    end_dt = pd.Timestamp(date_range[1], tz=all_dates.tz) + pd.Timedelta(days=1)
 else:
     start_dt = pd.Timestamp(min_date, tz=all_dates.tz)
-    end_dt = pd.Timestamp(max_date, tz=all_dates.tz) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    end_dt = pd.Timestamp(max_date, tz=all_dates.tz) + pd.Timedelta(days=1)
 
 # Filter all dataframes
 f_prices = filter_by_date(prices, start_dt, end_dt)
@@ -331,21 +375,21 @@ with tab_overview:
     st.markdown("---")
 
     # Compute KPIs
-    avg_price = f_prices["Price"].mean()
-    peak_load_mw = f_load["Actual Load"].max()
+    avg_price = f_prices[COL_PRICE].mean()
+    peak_load_mw = f_load[COL_ACTUAL_LOAD].max()
     peak_load_gw = peak_load_mw / 1000
 
     total_gen = f_gen.sum()
     total_all = total_gen.sum()
-    nuclear_pct = total_gen[list(NUCLEAR_TYPES & set(f_gen.columns))].sum() / total_all * 100 if total_all > 0 else 0
-    renewable_pct = total_gen[list(RENEWABLE_TYPES & set(f_gen.columns))].sum() / total_all * 100 if total_all > 0 else 0
+    nuclear_pct = _safe_pct(total_gen[list(NUCLEAR_TYPES & set(f_gen.columns))].sum(), total_all)
+    renewable_pct = _safe_pct(total_gen[list(RENEWABLE_TYPES & set(f_gen.columns))].sum(), total_all)
 
-    net_imports = sum(df["Net Import"].mean() for df in f_crossborder.values())
+    net_imports = sum(df[COL_NET_IMPORT].mean() for df in f_crossborder.values())
 
     # Compute delta: compare first half vs second half of the selected period
     mid = f_prices.index[len(f_prices) // 2] if len(f_prices) > 1 else f_prices.index[0]
-    first_half_price = f_prices.loc[f_prices.index < mid, "Price"].mean()
-    second_half_price = f_prices.loc[f_prices.index >= mid, "Price"].mean()
+    first_half_price = f_prices.loc[f_prices.index < mid, COL_PRICE].mean()
+    second_half_price = f_prices.loc[f_prices.index >= mid, COL_PRICE].mean()
     price_delta = second_half_price - first_half_price if pd.notna(first_half_price) and pd.notna(second_half_price) else None
 
     col1, col2, col3, col4 = st.columns(4)
@@ -359,7 +403,7 @@ with tab_overview:
     st.markdown("---")
     st.header("📈 Day-Ahead Prices")
 
-    fig_prices = px.line(f_prices.reset_index(), x="timestamp", y="Price", labels={"Price": "EUR/MWh", "timestamp": ""})
+    fig_prices = px.line(f_prices.reset_index(), x="timestamp", y=COL_PRICE, labels={COL_PRICE: "EUR/MWh", "timestamp": ""})
     fig_prices.update_layout(hovermode="x unified")
     st.plotly_chart(fig_prices, width="stretch", theme=None)
 
@@ -368,8 +412,8 @@ with tab_overview:
     st.header("🔌 Load: Actual vs Forecast")
 
     fig_load = go.Figure()
-    fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load["Actual Load"], name="Actual Load", mode="lines"))
-    fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load["Forecasted Load"], name="Forecasted Load", mode="lines", line=dict(dash="dash")))
+    fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load[COL_ACTUAL_LOAD], name="Actual Load", mode="lines"))
+    fig_load.add_trace(go.Scatter(x=f_load.index, y=f_load[COL_FORECAST_LOAD], name="Forecasted Load", mode="lines", line=dict(dash="dash")))
     fig_load.update_layout(yaxis_title="MW", hovermode="x unified")
     st.plotly_chart(fig_load, width="stretch", theme=None)
 
@@ -433,7 +477,7 @@ with tab_overview:
         for nb in NEIGHBOURS:
             df_nb = f_crossborder[nb]
             label = NEIGHBOUR_LABELS.get(nb, nb)
-            fig_cb.add_trace(go.Scatter(x=df_nb.index, y=df_nb["Net Import"], name=label, mode="lines"))
+            fig_cb.add_trace(go.Scatter(x=df_nb.index, y=df_nb[COL_NET_IMPORT], name=label, mode="lines"))
         fig_cb.update_layout(yaxis_title="MW", hovermode="x unified")
         st.plotly_chart(fig_cb, width="stretch", theme=None)
 
@@ -442,9 +486,8 @@ with tab_overview:
         summary_rows = []
         for nb in NEIGHBOURS:
             df_nb = f_crossborder[nb]
-            # Convert MW 15-min data to GWh: sum(MW) * 0.25h / 1000
-            total_import_gwh = df_nb["Import"].sum() * 0.25 / 1000
-            total_export_gwh = df_nb["Export"].sum() * 0.25 / 1000
+            total_import_gwh = _to_gwh(df_nb[COL_IMPORT].sum())
+            total_export_gwh = _to_gwh(df_nb[COL_EXPORT].sum())
             net_gwh = total_import_gwh - total_export_gwh
             summary_rows.append({
                 "Neighbour": NEIGHBOUR_LABELS.get(nb, nb),
@@ -468,11 +511,11 @@ with tab_load:
 
     fig_load_detail = go.Figure()
     fig_load_detail.add_trace(go.Scatter(
-        x=f_load.index, y=f_load["Actual Load"],
+        x=f_load.index, y=f_load[COL_ACTUAL_LOAD],
         name="Actual Load", mode="lines",
     ))
     fig_load_detail.add_trace(go.Scatter(
-        x=f_load.index, y=f_load["Forecasted Load"],
+        x=f_load.index, y=f_load[COL_FORECAST_LOAD],
         name="Forecasted Load", mode="lines", line=dict(dash="dash"),
     ))
     fig_load_detail.update_layout(yaxis_title="MW", hovermode="x unified", height=500)
@@ -482,7 +525,7 @@ with tab_load:
 
     st.header("📉 Forecast Error")
 
-    forecast_error = f_load["Actual Load"] - f_load["Forecasted Load"]
+    forecast_error = f_load[COL_ACTUAL_LOAD] - f_load[COL_FORECAST_LOAD]
 
     fig_error = go.Figure()
     fig_error.add_trace(go.Scatter(
@@ -504,15 +547,15 @@ with tab_load:
 
     load_profile = f_load.copy()
     load_profile["hour"] = load_profile.index.hour
-    hourly_avg = load_profile.groupby("hour")[["Actual Load", "Forecasted Load"]].mean()
+    hourly_avg = load_profile.groupby("hour")[[COL_ACTUAL_LOAD, COL_FORECAST_LOAD]].mean()
 
     fig_profile = go.Figure()
     fig_profile.add_trace(go.Scatter(
-        x=hourly_avg.index, y=hourly_avg["Actual Load"],
+        x=hourly_avg.index, y=hourly_avg[COL_ACTUAL_LOAD],
         name="Actual Load", mode="lines+markers",
     ))
     fig_profile.add_trace(go.Scatter(
-        x=hourly_avg.index, y=hourly_avg["Forecasted Load"],
+        x=hourly_avg.index, y=hourly_avg[COL_FORECAST_LOAD],
         name="Forecasted Load", mode="lines+markers", line=dict(dash="dash"),
     ))
     fig_profile.update_layout(
@@ -529,7 +572,7 @@ with tab_load:
     st.header("📊 Load Statistics")
 
     # KPI metrics
-    actual = f_load["Actual Load"]
+    actual = f_load[COL_ACTUAL_LOAD]
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Min Load", f"{actual.min() / 1000:.1f} GW")
     kpi2.metric("Max Load", f"{actual.max() / 1000:.1f} GW")
@@ -550,11 +593,11 @@ with tab_load:
     with stat_col2:
         st.subheader("Daily Summary")
         daily = f_load.resample("D").agg(
-            Min_MW=("Actual Load", "min"),
-            Max_MW=("Actual Load", "max"),
-            Mean_MW=("Actual Load", "mean"),
+            Min_MW=(COL_ACTUAL_LOAD, "min"),
+            Max_MW=(COL_ACTUAL_LOAD, "max"),
+            Mean_MW=(COL_ACTUAL_LOAD, "mean"),
         )
-        daily["Peak Hour"] = f_load["Actual Load"].groupby(f_load.index.date).apply(
+        daily["Peak Hour"] = f_load[COL_ACTUAL_LOAD].groupby(f_load.index.date).apply(
             lambda s: s.idxmax().strftime("%H:%M") if len(s) > 0 else "-"
         ).values
         daily.index = daily.index.strftime("%Y-%m-%d")
@@ -615,10 +658,9 @@ with tab_gen:
 
     total_gen_all = f_gen.sum()
     total_all_mw = total_gen_all.sum()
-    # Convert MW 15-min data to GWh: sum(MW) * 0.25h / 1000
-    total_gwh = total_all_mw * 0.25 / 1000
-    nuc_pct = total_gen_all[list(NUCLEAR_TYPES & set(f_gen.columns))].sum() / total_all_mw * 100 if total_all_mw > 0 else 0
-    ren_pct = total_gen_all[list(RENEWABLE_TYPES & set(f_gen.columns))].sum() / total_all_mw * 100 if total_all_mw > 0 else 0
+    total_gwh = _to_gwh(total_all_mw)
+    nuc_pct = _safe_pct(total_gen_all[list(NUCLEAR_TYPES & set(f_gen.columns))].sum(), total_all_mw)
+    ren_pct = _safe_pct(total_gen_all[list(RENEWABLE_TYPES & set(f_gen.columns))].sum(), total_all_mw)
 
     gk1, gk2, gk3 = st.columns(3)
     gk1.metric("Total Generation", f"{total_gwh:.1f} GWh")
@@ -626,7 +668,7 @@ with tab_gen:
     gk3.metric("Renewable Share", f"{ren_pct:.1f}%")
 
     st.subheader("Daily Generation Summary")
-    daily_gen = f_gen.resample("D").sum() * 0.25 / 1000  # GWh
+    daily_gen = f_gen.resample("D").sum().apply(_to_gwh)
     daily_total = daily_gen.sum(axis=1)
     daily_nuc = daily_gen[list(NUCLEAR_TYPES & set(f_gen.columns))].sum(axis=1)
     daily_ren = daily_gen[list(RENEWABLE_TYPES & set(f_gen.columns))].sum(axis=1)
@@ -714,7 +756,7 @@ with tab_capacity:
         for t in common_types:
             installed = cap_data[t]
             avg_actual = avg_gen_cap[t]
-            cf = avg_actual / installed * 100 if installed > 0 else 0
+            cf = _safe_pct(avg_actual, installed)
             cf_data.append({
                 "Technology": t,
                 "Installed (MW)": round(installed, 0),
@@ -802,11 +844,11 @@ with tab_windsolar:
     ws_metrics = []
     for src in ws_sources:
         if src in f_gen.columns:
-            src_gwh = f_gen[src].sum() * 0.25 / 1000
+            src_gwh = _to_gwh(f_gen[src].sum())
             ws_total_gwh += src_gwh
             # Capacity factor
             src_cap = cap_data[src] if src in cap_data.index else 0
-            cf = f_gen[src].mean() / src_cap * 100 if src_cap > 0 else 0
+            cf = _safe_pct(f_gen[src].mean(), src_cap)
             ws_metrics.append((src, src_gwh, cf))
 
     wk_cols = st.columns(1 + len(ws_metrics))
@@ -818,7 +860,7 @@ with tab_windsolar:
     daily_ws_rows = []
     for src in ws_sources:
         if src in f_gen.columns:
-            daily_src = f_gen[src].resample("D").sum() * 0.25 / 1000
+            daily_src = f_gen[src].resample("D").sum().apply(_to_gwh)
             for date, val in daily_src.items():
                 daily_ws_rows.append({"Date": date.strftime("%Y-%m-%d"), "Source": src, "GWh": round(val, 2)})
     if daily_ws_rows:
@@ -842,7 +884,7 @@ with tab_crossborder:
         df_nb = f_crossborder[nb]
         label = NEIGHBOUR_LABELS.get(nb, nb)
         fig_cb_detail.add_trace(go.Scatter(
-            x=df_nb.index, y=df_nb["Net Import"], name=label, mode="lines",
+            x=df_nb.index, y=df_nb[COL_NET_IMPORT], name=label, mode="lines",
         ))
     fig_cb_detail.add_hline(y=0, line_dash="dash", line_color="#1B2A4A", line_width=1)
     fig_cb_detail.update_layout(
@@ -864,15 +906,15 @@ with tab_crossborder:
                 df_nb = f_crossborder[nb]
                 fig_nb = go.Figure()
                 fig_nb.add_trace(go.Scatter(
-                    x=df_nb.index, y=df_nb["Import"], name="Import", mode="lines",
+                    x=df_nb.index, y=df_nb[COL_IMPORT], name="Import", mode="lines",
                     line=dict(color="#568203"),
                 ))
                 fig_nb.add_trace(go.Scatter(
-                    x=df_nb.index, y=df_nb["Export"], name="Export", mode="lines",
+                    x=df_nb.index, y=df_nb[COL_EXPORT], name="Export", mode="lines",
                     line=dict(color="#CC5500"),
                 ))
                 fig_nb.add_trace(go.Scatter(
-                    x=df_nb.index, y=df_nb["Net Import"], name="Net Import", mode="lines",
+                    x=df_nb.index, y=df_nb[COL_NET_IMPORT], name="Net Import", mode="lines",
                     line=dict(color="#1B2A4A", dash="dash"),
                 ))
                 fig_nb.update_layout(
@@ -888,7 +930,7 @@ with tab_crossborder:
     daily_net_rows = []
     for nb in NEIGHBOURS:
         df_nb = f_crossborder[nb]
-        daily_net = df_nb["Net Import"].resample("D").sum() * 0.25 / 1000  # GWh
+        daily_net = df_nb[COL_NET_IMPORT].resample("D").sum().apply(_to_gwh)
         label = NEIGHBOUR_LABELS.get(nb, nb)
         for date, val in daily_net.items():
             daily_net_rows.append({"Date": date, "Neighbour": label, "Net Import (GWh)": val})
@@ -910,8 +952,8 @@ with tab_crossborder:
     for nb in NEIGHBOURS:
         df_nb = f_crossborder[nb]
         label = NEIGHBOUR_LABELS.get(nb, nb)
-        imp_gwh = df_nb["Import"].sum() * 0.25 / 1000
-        exp_gwh = df_nb["Export"].sum() * 0.25 / 1000
+        imp_gwh = _to_gwh(df_nb[COL_IMPORT].sum())
+        exp_gwh = _to_gwh(df_nb[COL_EXPORT].sum())
         exchange_rows.append({"Neighbour": label, "Direction": "Import", "GWh": imp_gwh})
         exchange_rows.append({"Neighbour": label, "Direction": "Export", "GWh": exp_gwh})
 
@@ -934,7 +976,7 @@ with tab_crossborder:
     for nb in NEIGHBOURS:
         df_nb = f_crossborder[nb]
         label = NEIGHBOUR_LABELS.get(nb, nb)
-        nb_net_gwh[label] = (df_nb["Import"].sum() - df_nb["Export"].sum()) * 0.25 / 1000
+        nb_net_gwh[label] = _to_gwh(df_nb[COL_IMPORT].sum() - df_nb[COL_EXPORT].sum())
 
     total_net_gwh = sum(nb_net_gwh.values())
     largest_importer = max(nb_net_gwh, key=nb_net_gwh.get)
@@ -952,7 +994,7 @@ with tab_crossborder:
     for nb in NEIGHBOURS:
         df_nb = f_crossborder[nb]
         label = NEIGHBOUR_LABELS.get(nb, nb)
-        daily_net = df_nb["Net Import"].resample("D").sum() * 0.25 / 1000
+        daily_net = df_nb[COL_NET_IMPORT].resample("D").sum().apply(_to_gwh)
         for date, val in daily_net.items():
             daily_summary_rows.append({"Date": date.strftime("%Y-%m-%d"), "Neighbour": label, "GWh": round(val, 2)})
 

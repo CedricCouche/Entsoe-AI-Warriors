@@ -1,30 +1,20 @@
 """Collect energy data from ENTSO-E API for France."""
 
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 
 import pandas as pd
-from dotenv import load_dotenv
 from entsoe import EntsoePandasClient
+
+from entsoe_ai_warriors.client import get_client
 
 COUNTRY_CODE = "FR"
 
 # Output directory
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
-
-def get_client() -> EntsoePandasClient:
-    load_dotenv()
-    api_key = os.environ.get("ENTSOE_API_KEY")
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets["ENTSOE_API_KEY"]
-        except Exception:
-            pass
-    if not api_key:
-        raise RuntimeError("ENTSOE_API_KEY not found in environment or st.secrets")
-    return EntsoePandasClient(api_key=api_key)
+logger = logging.getLogger(__name__)
 
 
 def default_period() -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -39,7 +29,7 @@ def collect_day_ahead_prices(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.Series:
-    print(f"Fetching day-ahead prices for {COUNTRY_CODE}...")
+    logger.info("Fetching day-ahead prices for %s...", COUNTRY_CODE)
     return client.query_day_ahead_prices(COUNTRY_CODE, start=start, end=end)
 
 
@@ -48,7 +38,7 @@ def collect_load(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.DataFrame:
-    print(f"Fetching load (actual + forecast) for {COUNTRY_CODE}...")
+    logger.info("Fetching load (actual + forecast) for %s...", COUNTRY_CODE)
     return client.query_load_and_forecast(COUNTRY_CODE, start=start, end=end)
 
 
@@ -57,7 +47,7 @@ def collect_generation_by_type(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.DataFrame:
-    print(f"Fetching actual generation per type for {COUNTRY_CODE}...")
+    logger.info("Fetching actual generation per type for %s...", COUNTRY_CODE)
     return client.query_generation(COUNTRY_CODE, start=start, end=end, psr_type=None)
 
 
@@ -66,7 +56,7 @@ def collect_wind_solar_forecast(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.DataFrame:
-    print(f"Fetching wind & solar forecast for {COUNTRY_CODE}...")
+    logger.info("Fetching wind & solar forecast for %s...", COUNTRY_CODE)
     return client.query_wind_and_solar_forecast(COUNTRY_CODE, start=start, end=end)
 
 
@@ -75,10 +65,21 @@ def collect_installed_capacity(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.DataFrame:
-    print(f"Fetching installed generation capacity for {COUNTRY_CODE}...")
+    logger.info("Fetching installed generation capacity for %s...", COUNTRY_CODE)
     return client.query_installed_generation_capacity(
         COUNTRY_CODE, start=start, end=end
     )
+
+
+NEIGHBOUR_CODES = {
+    "BE": "10YBE----------2",
+    "DE_LU": "10Y1001A1001A82H",
+    "ES": "10YES-REE------0",
+    "GB": "10YGB----------A",
+    "IT_NORD": "10Y1001A1001A73I",
+    "CH": "10YCH-SWISSGRIDZ",
+}
+FR_CODE = "10YFR-RTE------C"
 
 
 def collect_crossborder_flows(
@@ -87,31 +88,26 @@ def collect_crossborder_flows(
     end: pd.Timestamp,
 ) -> dict[str, pd.Series]:
     """Collect cross-border physical flows between France and neighbours."""
-    neighbours = {
-        "BE": "10YBE----------2",
-        "DE_LU": "10Y1001A1001A82H",
-        "ES": "10YES-REE------0",
-        "GB": "10YGB----------A",
-        "IT_NORD": "10Y1001A1001A73I",
-        "CH": "10YCH-SWISSGRIDZ",
-    }
-    fr_code = "10YFR-RTE------C"
     flows = {}
-    for name, code in neighbours.items():
-        print(f"  Fetching flows FR -> {name}...")
+    for name, code in NEIGHBOUR_CODES.items():
+        logger.info("  Fetching flows FR -> %s...", name)
         try:
             flows[f"FR_to_{name}"] = client.query_crossborder_flows(
-                fr_code, code, start=start, end=end
+                FR_CODE, code, start=start, end=end
             )
+        except (ConnectionError, TimeoutError) as e:
+            logger.warning("  Skipped FR -> %s (network): %s", name, e)
         except Exception as e:
-            print(f"    Skipped FR -> {name}: {e}")
-        print(f"  Fetching flows {name} -> FR...")
+            logger.warning("  Skipped FR -> %s: %s", name, e)
+        logger.info("  Fetching flows %s -> FR...", name)
         try:
             flows[f"{name}_to_FR"] = client.query_crossborder_flows(
-                code, fr_code, start=start, end=end
+                code, FR_CODE, start=start, end=end
             )
+        except (ConnectionError, TimeoutError) as e:
+            logger.warning("  Skipped %s -> FR (network): %s", name, e)
         except Exception as e:
-            print(f"    Skipped {name} -> FR: {e}")
+            logger.warning("  Skipped %s -> FR: %s", name, e)
     return flows
 
 
@@ -119,41 +115,57 @@ def save(data: pd.DataFrame | pd.Series, name: str) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
     path = os.path.join(DATA_DIR, f"{name}.csv")
     data.to_csv(path)
-    print(f"  Saved {path}")
+    logger.info("  Saved %s", path)
 
 
 def main() -> None:
     client = get_client()
     start, end = default_period()
-    print(f"Period: {start} -> {end}\n")
+    logger.info("Period: %s -> %s", start, end)
 
-    # Day-ahead prices
-    prices = collect_day_ahead_prices(client, start, end)
-    save(prices, "france_day_ahead_prices")
+    # Each step is independent — collect and save what we can
+    steps: list[tuple[str, str]] = [
+        ("day_ahead_prices", "france_day_ahead_prices"),
+        ("load", "france_load"),
+        ("generation_by_type", "france_generation_by_type"),
+        ("wind_solar_forecast", "france_wind_solar_forecast"),
+        ("installed_capacity", "france_installed_capacity"),
+    ]
 
-    # Load (actual + forecast)
-    load = collect_load(client, start, end)
-    save(load, "france_load")
+    collectors = {
+        "day_ahead_prices": collect_day_ahead_prices,
+        "load": collect_load,
+        "generation_by_type": collect_generation_by_type,
+        "wind_solar_forecast": collect_wind_solar_forecast,
+        "installed_capacity": collect_installed_capacity,
+    }
 
-    # Generation by type
-    generation = collect_generation_by_type(client, start, end)
-    save(generation, "france_generation_by_type")
+    succeeded = 0
+    failed = 0
+    for step_name, csv_name in steps:
+        try:
+            data = collectors[step_name](client, start, end)
+            save(data, csv_name)
+            succeeded += 1
+        except Exception:
+            failed += 1
+            logger.exception("Failed to collect %s", step_name)
 
-    # Wind & solar forecast
-    ws_forecast = collect_wind_solar_forecast(client, start, end)
-    save(ws_forecast, "france_wind_solar_forecast")
+    # Cross-border flows (individual failures handled inside)
+    try:
+        flows = collect_crossborder_flows(client, start, end)
+        for name, series in flows.items():
+            save(series, f"france_crossborder_{name}")
+        succeeded += 1
+    except Exception:
+        failed += 1
+        logger.exception("Failed to collect cross-border flows")
 
-    # Installed capacity
-    capacity = collect_installed_capacity(client, start, end)
-    save(capacity, "france_installed_capacity")
-
-    # Cross-border flows
-    flows = collect_crossborder_flows(client, start, end)
-    for name, series in flows.items():
-        save(series, f"france_crossborder_{name}")
-
-    print("\nDone! All data saved to data/")
+    logger.info("Done! %d succeeded, %d failed.", succeeded, failed)
+    if failed:
+        logger.warning("%d collection(s) failed — some data may be stale.", failed)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

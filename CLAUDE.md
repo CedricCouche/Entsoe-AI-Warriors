@@ -21,8 +21,8 @@ Entsoe-AI-Warriors — ENTSO-E (European Network of Transmission System Operator
 
 | File | Purpose |
 |------|---------|
-| `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper |
-| `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France |
+| `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper (single source of truth for `get_client()`) |
+| `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France (imports `get_client` from `client.py`) |
 | `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard (with background auto-refresh) |
 
 ### Dashboard tabs
@@ -36,22 +36,40 @@ The dashboard has 6 tabs, all using the 1970s retro theme (Plotly template `retr
 5. **🌿 Wind & Solar Details** — per-source forecast vs actual (Solar, Wind Onshore, Wind Offshore), forecast error with zero line, hourly daily profile, KPIs with capacity factors, daily GWh pivot table
 6. **🔀 Cross-Border Details** — net imports line chart, per-neighbour import/export/net charts (3x2 grid), daily net import stacked bar, total energy exchanged grouped bar, KPIs (total net GWh, largest importer/exporter), daily net import summary table
 
+### Key constants and helpers (dashboard.py)
+
+- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh (used everywhere instead of inline `* 0.25 / 1000`)
+- `_safe_pct()` — division-safe percentage computation (handles zero/NaN denominators)
+- `COL_*` constants — single source of truth for CSV column names (`COL_PRICE`, `COL_ACTUAL_LOAD`, `COL_FORECAST_LOAD`, `COL_IMPORT`, `COL_EXPORT`, `COL_NET_IMPORT`)
+- Data loaders validate non-empty data and expected columns on load
+
 ### Background data refresh
 
-The dashboard spawns a daemon thread that calls `collect_france.main()` every hour to keep CSV data fresh. The sidebar displays the last download timestamp (based on CSV file modification time). The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
+The dashboard spawns a daemon thread that calls `collect_france.main()` every hour to keep CSV data fresh. The sidebar displays the last download timestamp (based on CSV file modification time) and shows a warning if the last refresh failed. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
+
+### Error handling
+
+- `collect_france.main()` wraps each collection step independently — partial failures don't prevent other data from being saved
+- Cross-border flow collection handles per-neighbour failures gracefully
+- Dashboard data loaders validate CSV structure on load and show clear error messages
+- Background refresh failures are surfaced in the sidebar
 
 ### Dependencies
 
-- `entsoe-py` — ENTSO-E Transparency Platform API client
-- `streamlit` — web dashboard framework
-- `plotly` — interactive charts
-- `python-dotenv` — environment variable management
+- `entsoe-py>=0.7` — ENTSO-E Transparency Platform API client
+- `streamlit>=1.30` — web dashboard framework
+- `plotly>=6.0` — interactive charts
+- `python-dotenv>=1.0` — environment variable management
+- **Dev:** `pytest`, `ruff`, `mypy` (via `uv sync --extra dev`)
 
 ## Common commands
 
 ```bash
 # Install dependencies
 uv sync
+
+# Install with dev tools
+uv sync --extra dev
 
 # Launch the dashboard
 uv run streamlit run src/entsoe_ai_warriors/dashboard.py
