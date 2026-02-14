@@ -1,0 +1,4 @@
+entsoe-py
+plotly
+python-dotenv
+streamlit

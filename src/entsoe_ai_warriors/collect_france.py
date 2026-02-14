@@ -15,7 +15,15 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
 def get_client() -> EntsoePandasClient:
     load_dotenv()
-    api_key = os.environ["ENTSOE_API_KEY"]
+    api_key = os.environ.get("ENTSOE_API_KEY")
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = st.secrets["ENTSOE_API_KEY"]
+        except Exception:
+            pass
+    if not api_key:
+        raise RuntimeError("ENTSOE_API_KEY not found in environment or st.secrets")
     return EntsoePandasClient(api_key=api_key)
 
 

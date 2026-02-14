@@ -14,6 +14,7 @@ import streamlit as st
 from entsoe_ai_warriors.collect_france import main as collect_data
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 REFRESH_INTERVAL_SECONDS = 15 * 60  # 15 minutes
 
@@ -136,17 +137,38 @@ def filter_by_date(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> 
 # ── Page config ─────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="France Energy Dashboard", page_icon="⚡", layout="wide")
-_ensure_refresh_thread()
 st.title("⚡ France Energy Dashboard — ENTSO-E Data")
+
+# ── Initial data collection if CSVs are missing ────────────────────────────
+
+_required_csv = DATA_DIR / "france_day_ahead_prices.csv"
+if not _required_csv.exists():
+    with st.status("Collecting initial data from ENTSO-E API...", expanded=True) as status:
+        st.write("First launch detected — downloading 7 days of data. This may take a few minutes.")
+        try:
+            collect_data()
+            st.cache_data.clear()
+            status.update(label="Initial data collection complete!", state="complete")
+        except Exception as e:
+            status.update(label="Data collection failed", state="error")
+            st.error(f"Could not collect data: {e}")
+            st.stop()
+
+_ensure_refresh_thread()
 
 # ── Load all data ───────────────────────────────────────────────────────────
 
-prices = load_prices()
-load = load_load()
-generation = load_generation()
-forecast = load_wind_solar_forecast()
-capacity = load_installed_capacity()
-crossborder = load_crossborder()
+try:
+    prices = load_prices()
+    load = load_load()
+    generation = load_generation()
+    forecast = load_wind_solar_forecast()
+    capacity = load_installed_capacity()
+    crossborder = load_crossborder()
+except FileNotFoundError as e:
+    st.error(f"Data files not found: {e}")
+    st.info("Please ensure the ENTSO-E API key is configured and data has been collected.")
+    st.stop()
 
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 
