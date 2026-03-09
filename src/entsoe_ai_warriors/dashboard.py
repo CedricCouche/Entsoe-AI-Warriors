@@ -60,7 +60,34 @@ SOURCE_COLORS = {
     "Hydro Water Reservoir": "#00BFFF",           # Deep sky blue
 }
 
+RETRO_TEMPLATE_DARK = go.layout.Template(
+    layout=go.Layout(
+        font=dict(family="'EB Garamond', Georgia, 'Times New Roman', serif", color="#F5E8C8"),
+        title=dict(font=dict(size=18)),
+        paper_bgcolor="#1C1208",
+        plot_bgcolor="#241A0C",
+        colorway=RETRO_COLORS,
+        xaxis=dict(
+            gridcolor="rgba(245,232,200,0.10)",
+            linecolor="#F5E8C8",
+            zerolinecolor="rgba(245,232,200,0.20)",
+        ),
+        yaxis=dict(
+            gridcolor="rgba(245,232,200,0.10)",
+            linecolor="#F5E8C8",
+            zerolinecolor="rgba(245,232,200,0.20)",
+        ),
+        legend=dict(bgcolor="rgba(28,18,8,0.80)", bordercolor="#F5E8C8", borderwidth=1),
+    ),
+    data=dict(
+        scatter=[go.Scatter(line=dict(width=2.5))],
+        bar=[go.Bar(marker=dict(line=dict(width=0.5, color="#1C1208")))],
+        pie=[go.Pie(marker=dict(line=dict(width=1, color="#1C1208")))],
+    ),
+)
+
 pio.templates["retro_70s"] = RETRO_TEMPLATE
+pio.templates["retro_70s_dark"] = RETRO_TEMPLATE_DARK
 pio.templates.default = "retro_70s"
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -233,49 +260,65 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown("""
+# ── Theme selection ──────────────────────────────────────────────────────────
+# Read early so CSS and Plotly template are applied before any chart is drawn.
+
+_theme_mode = st.sidebar.radio("🎨 Theme", ["Light", "Dark"], horizontal=True, key="theme_mode")
+st.sidebar.markdown("---")
+_dark = _theme_mode == "Dark"
+
+pio.templates.default = "retro_70s_dark" if _dark else "retro_70s"
+
+# Colors that vary between light and dark mode
+_app_bg     = "#1C1208" if _dark else "#FFF8DC"
+_sidebar_bg = "#3D2510" if _dark else "#CC7A2E"
+_text       = "#F5E8C8" if _dark else "#1B2A4A"
+_metric_val = "#E1AD01" if _dark else "#CC5500"
+_hline_color = "#F5E8C8" if _dark else "#1B2A4A"
+
+st.markdown(f"""
 <style>
-    .stApp {
-        background-color: #FFF8DC;
+    .stApp {{
+        background-color: {_app_bg};
         font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
-    }
-    [data-testid="stSidebar"] {
-        background-color: #CC7A2E;
-    }
+    }}
+    [data-testid="stSidebar"] {{
+        background-color: {_sidebar_bg};
+    }}
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     .stApp [data-testid="stHeading"] h1,
     .stApp [data-testid="stHeading"] h2,
     .stApp [data-testid="stHeading"] h3,
     .stApp [data-testid="stHeading"] h4,
     .stApp .stMarkdown h1, .stApp .stMarkdown h2,
-    .stApp .stMarkdown h3, .stApp .stMarkdown h4 {
+    .stApp .stMarkdown h3, .stApp .stMarkdown h4 {{
         font-family: 'Abril Fatface', Georgia, 'Times New Roman', serif !important;
-        color: #1B2A4A;
-    }
-    .stApp p, .stApp span, .stApp label, .stApp .stCaption {
+        color: {_text};
+    }}
+    .stApp p, .stApp span, .stApp label, .stApp .stCaption {{
         font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
-        color: #1B2A4A;
-    }
-    [data-testid="stMetricValue"] {
-        color: #CC5500;
-    }
-    [data-testid="stMetricLabel"] {
-        color: #1B2A4A;
-    }
+        color: {_text};
+    }}
+    [data-testid="stMetricValue"] {{
+        color: {_metric_val};
+    }}
+    [data-testid="stMetricLabel"] {{
+        color: {_text};
+    }}
     /* Remove white frame around Plotly charts */
     .stPlotlyChart, [data-testid="stPlotlyChart"],
     .stPlotlyChart > div, [data-testid="stPlotlyChart"] > div,
-    .stPlotlyChart iframe, [data-testid="stPlotlyChart"] iframe {
+    .stPlotlyChart iframe, [data-testid="stPlotlyChart"] iframe {{
         background-color: transparent !important;
-    }
-    .js-plotly-plot .plotly .main-svg {
+    }}
+    .js-plotly-plot .plotly .main-svg {{
         background: transparent !important;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown(
-    '<h1 style="font-family: \'Abril Fatface\', Georgia, serif; color: #1B2A4A;">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
+    f'<h1 style="font-family: \'Abril Fatface\', Georgia, serif; color: {_text};">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
     unsafe_allow_html=True,
 )
 
@@ -533,7 +576,7 @@ with tab_load:
         name="Forecast Error", mode="lines",
         fill="tozeroy", fillcolor="rgba(204,85,0,0.15)",
     ))
-    fig_error.add_hline(y=0, line_dash="dash", line_color="#1B2A4A", line_width=1)
+    fig_error.add_hline(y=0, line_dash="dash", line_color=_hline_color, line_width=1)
     fig_error.update_layout(
         yaxis_title="MW (Actual - Forecast)",
         hovermode="x unified",
@@ -813,7 +856,7 @@ with tab_windsolar:
                 x=common_idx, y=error, name=src, mode="lines",
                 line=dict(color=color) if color else None,
             ))
-    fig_ws_error.add_hline(y=0, line_dash="dash", line_color="#1B2A4A", line_width=1)
+    fig_ws_error.add_hline(y=0, line_dash="dash", line_color=_hline_color, line_width=1)
     fig_ws_error.update_layout(yaxis_title="MW", hovermode="x unified", height=400)
     st.plotly_chart(fig_ws_error, width="stretch", theme=None)
 
@@ -886,7 +929,7 @@ with tab_crossborder:
         fig_cb_detail.add_trace(go.Scatter(
             x=df_nb.index, y=df_nb[COL_NET_IMPORT], name=label, mode="lines",
         ))
-    fig_cb_detail.add_hline(y=0, line_dash="dash", line_color="#1B2A4A", line_width=1)
+    fig_cb_detail.add_hline(y=0, line_dash="dash", line_color=_hline_color, line_width=1)
     fig_cb_detail.update_layout(
         yaxis_title="MW (positive = import)", hovermode="x unified", height=500,
     )
@@ -915,7 +958,7 @@ with tab_crossborder:
                 ))
                 fig_nb.add_trace(go.Scatter(
                     x=df_nb.index, y=df_nb[COL_NET_IMPORT], name="Net Import", mode="lines",
-                    line=dict(color="#1B2A4A", dash="dash"),
+                    line=dict(color=_hline_color, dash="dash"),
                 ))
                 fig_nb.update_layout(
                     yaxis_title="MW", hovermode="x unified", height=350,
