@@ -9,7 +9,8 @@ Entsoe-AI-Warriors — ENTSO-E (European Network of Transmission System Operator
 ## Repository
 
 - Remote: `git@github.com:CedricCouche/Entsoe-AI-Warriors.git`
-- Branch: `main`
+- Branch: `main` — stable, production-ready
+- Branch: `dev-claude` — dedicated to all work done with Claude Code (merge into `main` when ready)
 
 ## Architecture
 
