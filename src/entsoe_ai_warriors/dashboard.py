@@ -63,34 +63,7 @@ SOURCE_COLORS = {
     "Hydro Water Reservoir": "#3949AB",           # Indigo
 }
 
-ADALAN_TEMPLATE_DARK = go.layout.Template(
-    layout=go.Layout(
-        font=dict(family=ADALAN_FONT, color="#E2EAF4"),
-        title=dict(font=dict(size=17, color="#E2EAF4")),
-        paper_bgcolor="#0D1B2A",
-        plot_bgcolor="#112236",
-        colorway=ADALAN_COLORS,
-        xaxis=dict(
-            gridcolor="rgba(34,153,221,0.12)",
-            linecolor="#1E3A5F",
-            zerolinecolor="rgba(226,234,244,0.15)",
-        ),
-        yaxis=dict(
-            gridcolor="rgba(34,153,221,0.12)",
-            linecolor="#1E3A5F",
-            zerolinecolor="rgba(226,234,244,0.15)",
-        ),
-        legend=dict(bgcolor="rgba(13,27,42,0.85)", bordercolor="#1E3A5F", borderwidth=1),
-    ),
-    data=dict(
-        scatter=[go.Scatter(line=dict(width=2.5))],
-        bar=[go.Bar(marker=dict(line=dict(width=0, color="#0D1B2A")))],
-        pie=[go.Pie(marker=dict(line=dict(width=1, color="#0D1B2A")))],
-    ),
-)
-
 pio.templates["adalan"] = ADALAN_TEMPLATE
-pio.templates["adalan_dark"] = ADALAN_TEMPLATE_DARK
 pio.templates.default = "adalan"
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -266,64 +239,73 @@ st.markdown(
 # ── Theme selection ──────────────────────────────────────────────────────────
 # Read early so CSS and Plotly template are applied before any chart is drawn.
 
-_theme_mode = st.sidebar.radio("🎨 Theme", ["Light", "Dark"], horizontal=True, key="theme_mode")
-st.sidebar.markdown("---")
-_dark = _theme_mode == "Dark"
+_text        = "#1A2940"
+_metric_val  = "#2299DD"
+_hline_color = "#1A2940"
 
-pio.templates.default = "adalan_dark" if _dark else "adalan"
-
-# Colors that vary between light and dark mode
-_app_bg      = "#0D1B2A" if _dark else "#F4F7FB"
-_sidebar_bg  = "#0A1628" if _dark else "#1A3A5C"
-_text        = "#E2EAF4" if _dark else "#1A2940"
-_metric_val  = "#2299DD" if _dark else "#2299DD"
-_hline_color = "#E2EAF4" if _dark else "#1A2940"
-
-st.markdown(f"""
+st.markdown("""
 <style>
-    .stApp {{
-        background-color: {_app_bg};
+    .stApp {
+        background-color: #F4F7FB;
         font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-    }}
-    [data-testid="stSidebar"] {{
-        background-color: {_sidebar_bg};
-    }}
+    }
+    [data-testid="stSidebar"] {
+        background-color: #1A3A5C;
+    }
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span,
+    [data-testid="stSidebar"] label,
+    [data-testid="stSidebar"] div,
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3,
+    [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] .stMarkdown h1,
+    [data-testid="stSidebar"] .stMarkdown h2,
+    [data-testid="stSidebar"] .stMarkdown h3,
+    [data-testid="stSidebar"] .stMarkdown h4,
+    [data-testid="stSidebar"] .stCaption,
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] {
+        color: #FFFFFF !important;
+    }
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     .stApp [data-testid="stHeading"] h1,
     .stApp [data-testid="stHeading"] h2,
     .stApp [data-testid="stHeading"] h3,
     .stApp [data-testid="stHeading"] h4,
     .stApp .stMarkdown h1, .stApp .stMarkdown h2,
-    .stApp .stMarkdown h3, .stApp .stMarkdown h4 {{
+    .stApp .stMarkdown h3, .stApp .stMarkdown h4 {
         font-family: 'Inter', 'Segoe UI', Arial, sans-serif !important;
         font-weight: 600;
-        color: {_text};
-    }}
-    .stApp p, .stApp span, .stApp label, .stApp .stCaption {{
+        color: #1A2940;
+    }
+    .stApp p, .stApp span, .stApp label, .stApp .stCaption {
         font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
-        color: {_text};
-    }}
-    [data-testid="stMetricValue"] {{
-        color: {_metric_val};
+        color: #1A2940;
+    }
+    [data-testid="stMetricValue"] {
+        color: #2299DD;
         font-weight: 600;
-    }}
-    [data-testid="stMetricLabel"] {{
-        color: {_text};
-    }}
+    }
+    [data-testid="stMetricLabel"] {
+        color: #1A2940;
+    }
     /* Remove white frame around Plotly charts */
     .stPlotlyChart, [data-testid="stPlotlyChart"],
     .stPlotlyChart > div, [data-testid="stPlotlyChart"] > div,
-    .stPlotlyChart iframe, [data-testid="stPlotlyChart"] iframe {{
+    .stPlotlyChart iframe, [data-testid="stPlotlyChart"] iframe {
         background-color: transparent !important;
-    }}
-    .js-plotly-plot .plotly .main-svg {{
+    }
+    .js-plotly-plot .plotly .main-svg {
         background: transparent !important;
-    }}
+    }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown(
-    f'<h1 style="font-family: \'Inter\', \'Segoe UI\', Arial, sans-serif; font-weight: 700; color: {_text};">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
+    '<h1 style="font-family: \'Inter\', \'Segoe UI\', Arial, sans-serif; font-weight: 700; color: #1A2940;">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
     unsafe_allow_html=True,
 )
 
