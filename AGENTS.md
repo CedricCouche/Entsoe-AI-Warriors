@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Project context for AI coding agents (Claude Code, Codex, Gemini CLI, Jules, etc.).
 
 ## Project
 
@@ -17,9 +17,17 @@ Entsoe-AI-Warriors — ENTSO-E (European Network of Transmission System Operator
 - **Package:** `src/entsoe_ai_warriors/` (Hatch build system)
 - **Data:** `data/` — 17 CSV files with 7 days of French energy data (prices, load, generation, wind/solar forecast, installed capacity, cross-border flows with BE/CH/DE_LU/ES/GB/IT_NORD)
 
-### Skills / Reference docs
+### Key files
 
-Reference `SKILL.md` files are stored under `.claude/` at the project root:
+| File | Purpose |
+|------|---------|
+| `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper (single source of truth for `get_client()`) |
+| `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France (imports `get_client` from `client.py`) |
+| `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard (with background auto-refresh) |
+
+### Reference docs
+
+Topic-specific `SKILL.md` files are stored under `.claude/`:
 
 | Folder | Topic |
 |--------|-------|
@@ -30,35 +38,27 @@ Reference `SKILL.md` files are stored under `.claude/` at the project root:
 | `.claude/GraphicChart/` | Graphic chart design patterns |
 | `.claude/ENSTOE-API/` | ENTSO-E API usage |
 
-### Key files
-
-| File | Purpose |
-|------|---------|
-| `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper (single source of truth for `get_client()`) |
-| `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France (imports `get_client` from `client.py`) |
-| `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard (with background auto-refresh) |
-
 ### Dashboard tabs
 
 The dashboard has 6 tabs, all using the 1970s retro theme (Plotly template `retro_70s`) and `SOURCE_COLORS` for per-source colouring:
 
-1. **⚡ Overview** — KPIs, day-ahead prices, load actual vs forecast, generation mix (stacked area + donut), renewables forecast vs actual, installed capacity bar, cross-border flows
-2. **🔌 Load Details** — larger actual vs forecast chart, forecast error (fill-to-zero), average daily profile by hour, statistics (min/max/mean/std, histogram, daily summary table)
-3. **🏭 Generation Details** — stacked area chart, donut + horizontal bar of average MW per source, KPIs (total GWh, nuclear %, renewable %), daily generation summary table
-4. **🔋 Installed Capacity** — horizontal bar + donut, capacity vs average generation side-by-side bar, KPIs (total GW, top 3 technologies), capacity factor table per technology
-5. **🌿 Wind & Solar Details** — per-source forecast vs actual (Solar, Wind Onshore, Wind Offshore), forecast error with zero line, hourly daily profile, KPIs with capacity factors, daily GWh pivot table
-6. **🔀 Cross-Border Details** — net imports line chart, per-neighbour import/export/net charts (3x2 grid), daily net import stacked bar, total energy exchanged grouped bar, KPIs (total net GWh, largest importer/exporter), daily net import summary table
+1. **Overview** — KPIs, day-ahead prices, load actual vs forecast, generation mix (stacked area + donut), renewables forecast vs actual, installed capacity bar, cross-border flows
+2. **Load Details** — larger actual vs forecast chart, forecast error (fill-to-zero), average daily profile by hour, statistics (min/max/mean/std, histogram, daily summary table)
+3. **Generation Details** — stacked area chart, donut + horizontal bar of average MW per source, KPIs (total GWh, nuclear %, renewable %), daily generation summary table
+4. **Installed Capacity** — horizontal bar + donut, capacity vs average generation side-by-side bar, KPIs (total GW, top 3 technologies), capacity factor table per technology
+5. **Wind & Solar Details** — per-source forecast vs actual (Solar, Wind Onshore, Wind Offshore), forecast error with zero line, hourly daily profile, KPIs with capacity factors, daily GWh pivot table
+6. **Cross-Border Details** — net imports line chart, per-neighbour import/export/net charts (3x2 grid), daily net import stacked bar, total energy exchanged grouped bar, KPIs (total net GWh, largest importer/exporter), daily net import summary table
 
 ### Key constants and helpers (dashboard.py)
 
-- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh (used everywhere instead of inline `* 0.25 / 1000`)
+- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh
 - `_safe_pct()` — division-safe percentage computation (handles zero/NaN denominators)
 - `COL_*` constants — single source of truth for CSV column names (`COL_PRICE`, `COL_ACTUAL_LOAD`, `COL_FORECAST_LOAD`, `COL_IMPORT`, `COL_EXPORT`, `COL_NET_IMPORT`)
 - Data loaders validate non-empty data and expected columns on load
 
 ### Background data refresh
 
-The dashboard spawns a daemon thread that calls `collect_france.main()` every hour to keep CSV data fresh. The sidebar displays the last download timestamp (based on CSV file modification time) and shows a warning if the last refresh failed. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
+The dashboard spawns a daemon thread that calls `collect_france.main()` every hour to keep CSV data fresh. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
 
 ### Error handling
 
