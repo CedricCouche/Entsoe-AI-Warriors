@@ -14,81 +14,84 @@ import streamlit as st
 
 from entsoe_ai_warriors.collect_france import main as collect_data
 
-# ── 1970s Retro Theme ────────────────────────────────────────────────────────
+# ── Adalan-inspired Theme ─────────────────────────────────────────────────────
+# Palette: corporate blue #2299DD, orange accent #F57C00, clean white/navy tones
 
-RETRO_COLORS = [
-    "#CC5500",  # Burnt Orange
-    "#568203",  # Avocado Green
-    "#E1AD01",  # Mustard Yellow
-    "#DA9100",  # Harvest Gold
-    "#8B4513",  # Saddle Brown
-    "#A0522D",  # Sienna
-    "#556B2F",  # Dark Olive
-    "#CD853F",  # Peru
+ADALAN_COLORS = [
+    "#2299DD",  # Adalan Blue
+    "#F57C00",  # Orange accent
+    "#00ACC1",  # Teal
+    "#43A047",  # Green
+    "#8E24AA",  # Purple
+    "#E53935",  # Red
+    "#FB8C00",  # Amber
+    "#3949AB",  # Indigo
 ]
 
-RETRO_TEMPLATE = go.layout.Template(
+ADALAN_FONT = "'Inter', 'Segoe UI', Arial, sans-serif"
+
+ADALAN_TEMPLATE = go.layout.Template(
     layout=go.Layout(
-        font=dict(family="'EB Garamond', Georgia, 'Times New Roman', serif", color="#1B2A4A"),
-        title=dict(font=dict(size=18)),
-        paper_bgcolor="#FFF8DC",
-        plot_bgcolor="#F5E8C8",
-        colorway=RETRO_COLORS,
+        font=dict(family=ADALAN_FONT, color="#1A2940"),
+        title=dict(font=dict(size=17, color="#1A2940")),
+        paper_bgcolor="#FFFFFF",
+        plot_bgcolor="#F4F7FB",
+        colorway=ADALAN_COLORS,
         xaxis=dict(
-            gridcolor="rgba(59,37,7,0.15)",
-            linecolor="#1B2A4A",
-            zerolinecolor="rgba(27,42,74,0.3)",
+            gridcolor="rgba(34,153,221,0.12)",
+            linecolor="#CBD5E1",
+            zerolinecolor="rgba(26,41,64,0.15)",
         ),
         yaxis=dict(
-            gridcolor="rgba(59,37,7,0.15)",
-            linecolor="#1B2A4A",
-            zerolinecolor="rgba(27,42,74,0.3)",
+            gridcolor="rgba(34,153,221,0.12)",
+            linecolor="#CBD5E1",
+            zerolinecolor="rgba(26,41,64,0.15)",
         ),
-        legend=dict(bgcolor="rgba(255,248,220,0.8)", bordercolor="#1B2A4A", borderwidth=1),
+        legend=dict(bgcolor="rgba(255,255,255,0.9)", bordercolor="#CBD5E1", borderwidth=1),
     ),
     data=dict(
         scatter=[go.Scatter(line=dict(width=2.5))],
-        bar=[go.Bar(marker=dict(line=dict(width=0.5, color="#1B2A4A")))],
-        pie=[go.Pie(marker=dict(line=dict(width=1, color="#FFF8DC")))],
+        bar=[go.Bar(marker=dict(line=dict(width=0, color="#FFFFFF")))],
+        pie=[go.Pie(marker=dict(line=dict(width=1, color="#FFFFFF")))],
     ),
 )
 
 SOURCE_COLORS = {
-    "Solar": "#9B30FF",                          # Bright violet
-    "Hydro Pumped Storage": "#1E90FF",            # Dodger blue
-    "Hydro Run-of-river and poundage": "#4169E1", # Royal blue
-    "Hydro Water Reservoir": "#00BFFF",           # Deep sky blue
+    "Solar": "#F57C00",                          # Orange
+    "Hydro Pumped Storage": "#2299DD",            # Adalan Blue
+    "Hydro Run-of-river and poundage": "#00ACC1", # Teal
+    "Hydro Water Reservoir": "#3949AB",           # Indigo
 }
 
-RETRO_TEMPLATE_DARK = go.layout.Template(
+ADALAN_TEMPLATE_DARK = go.layout.Template(
     layout=go.Layout(
-        font=dict(family="'EB Garamond', Georgia, 'Times New Roman', serif", color="#F5E8C8"),
-        title=dict(font=dict(size=18)),
-        paper_bgcolor="#1C1208",
-        plot_bgcolor="#241A0C",
-        colorway=RETRO_COLORS,
+        font=dict(family=ADALAN_FONT, color="#E2EAF4"),
+        title=dict(font=dict(size=17, color="#E2EAF4")),
+        paper_bgcolor="#0D1B2A",
+        plot_bgcolor="#112236",
+        colorway=ADALAN_COLORS,
         xaxis=dict(
-            gridcolor="rgba(245,232,200,0.10)",
-            linecolor="#F5E8C8",
-            zerolinecolor="rgba(245,232,200,0.20)",
+            gridcolor="rgba(34,153,221,0.12)",
+            linecolor="#1E3A5F",
+            zerolinecolor="rgba(226,234,244,0.15)",
         ),
         yaxis=dict(
-            gridcolor="rgba(245,232,200,0.10)",
-            linecolor="#F5E8C8",
-            zerolinecolor="rgba(245,232,200,0.20)",
+            gridcolor="rgba(34,153,221,0.12)",
+            linecolor="#1E3A5F",
+            zerolinecolor="rgba(226,234,244,0.15)",
         ),
-        legend=dict(bgcolor="rgba(28,18,8,0.80)", bordercolor="#F5E8C8", borderwidth=1),
+        legend=dict(bgcolor="rgba(13,27,42,0.85)", bordercolor="#1E3A5F", borderwidth=1),
     ),
     data=dict(
         scatter=[go.Scatter(line=dict(width=2.5))],
-        bar=[go.Bar(marker=dict(line=dict(width=0.5, color="#1C1208")))],
-        pie=[go.Pie(marker=dict(line=dict(width=1, color="#1C1208")))],
+        bar=[go.Bar(marker=dict(line=dict(width=0, color="#0D1B2A")))],
+        pie=[go.Pie(marker=dict(line=dict(width=1, color="#0D1B2A")))],
     ),
 )
 
-pio.templates["retro_70s"] = RETRO_TEMPLATE
-pio.templates["retro_70s_dark"] = RETRO_TEMPLATE_DARK
-pio.templates.default = "retro_70s"
+pio.templates["adalan"] = ADALAN_TEMPLATE
+pio.templates["adalan_dark"] = ADALAN_TEMPLATE_DARK
+pio.templates.default = "adalan"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -256,7 +259,7 @@ def filter_by_date(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp) -> 
 st.set_page_config(page_title="France Energy Dashboard", page_icon="⚡", layout="wide")
 
 st.markdown(
-    '<link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">',
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">',
     unsafe_allow_html=True,
 )
 
@@ -267,20 +270,20 @@ _theme_mode = st.sidebar.radio("🎨 Theme", ["Light", "Dark"], horizontal=True,
 st.sidebar.markdown("---")
 _dark = _theme_mode == "Dark"
 
-pio.templates.default = "retro_70s_dark" if _dark else "retro_70s"
+pio.templates.default = "adalan_dark" if _dark else "adalan"
 
 # Colors that vary between light and dark mode
-_app_bg     = "#1C1208" if _dark else "#FFF8DC"
-_sidebar_bg = "#3D2510" if _dark else "#CC7A2E"
-_text       = "#F5E8C8" if _dark else "#1B2A4A"
-_metric_val = "#E1AD01" if _dark else "#CC5500"
-_hline_color = "#F5E8C8" if _dark else "#1B2A4A"
+_app_bg      = "#0D1B2A" if _dark else "#F4F7FB"
+_sidebar_bg  = "#0A1628" if _dark else "#1A3A5C"
+_text        = "#E2EAF4" if _dark else "#1A2940"
+_metric_val  = "#2299DD" if _dark else "#2299DD"
+_hline_color = "#E2EAF4" if _dark else "#1A2940"
 
 st.markdown(f"""
 <style>
     .stApp {{
         background-color: {_app_bg};
-        font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
     }}
     [data-testid="stSidebar"] {{
         background-color: {_sidebar_bg};
@@ -292,15 +295,17 @@ st.markdown(f"""
     .stApp [data-testid="stHeading"] h4,
     .stApp .stMarkdown h1, .stApp .stMarkdown h2,
     .stApp .stMarkdown h3, .stApp .stMarkdown h4 {{
-        font-family: 'Abril Fatface', Georgia, 'Times New Roman', serif !important;
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif !important;
+        font-weight: 600;
         color: {_text};
     }}
     .stApp p, .stApp span, .stApp label, .stApp .stCaption {{
-        font-family: 'EB Garamond', Georgia, 'Times New Roman', serif;
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
         color: {_text};
     }}
     [data-testid="stMetricValue"] {{
         color: {_metric_val};
+        font-weight: 600;
     }}
     [data-testid="stMetricLabel"] {{
         color: {_text};
@@ -318,7 +323,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 st.markdown(
-    f'<h1 style="font-family: \'Abril Fatface\', Georgia, serif; color: {_text};">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
+    f'<h1 style="font-family: \'Inter\', \'Segoe UI\', Arial, sans-serif; font-weight: 700; color: {_text};">⚡ France Energy Dashboard — ENTSO-E Data</h1>',
     unsafe_allow_html=True,
 )
 
@@ -950,11 +955,11 @@ with tab_crossborder:
                 fig_nb = go.Figure()
                 fig_nb.add_trace(go.Scatter(
                     x=df_nb.index, y=df_nb[COL_IMPORT], name="Import", mode="lines",
-                    line=dict(color="#568203"),
+                    line=dict(color="#2299DD"),
                 ))
                 fig_nb.add_trace(go.Scatter(
                     x=df_nb.index, y=df_nb[COL_EXPORT], name="Export", mode="lines",
-                    line=dict(color="#CC5500"),
+                    line=dict(color="#F57C00"),
                 ))
                 fig_nb.add_trace(go.Scatter(
                     x=df_nb.index, y=df_nb[COL_NET_IMPORT], name="Net Import", mode="lines",
@@ -1005,7 +1010,7 @@ with tab_crossborder:
         fig_exchange = px.bar(
             exchange_df, x="GWh", y="Neighbour", color="Direction",
             orientation="h", barmode="group",
-            color_discrete_map={"Import": "#568203", "Export": "#CC5500"},
+            color_discrete_map={"Import": "#2299DD", "Export": "#F57C00"},
         )
         fig_exchange.update_layout(height=400, hovermode="y unified")
         st.plotly_chart(fig_exchange, width="stretch", theme=None)
