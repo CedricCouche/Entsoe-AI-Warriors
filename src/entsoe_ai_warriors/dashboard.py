@@ -13,6 +13,16 @@ import plotly.io as pio
 import streamlit as st
 
 from entsoe_ai_warriors.collect_france import main as collect_data
+from entsoe_ai_warriors.process_france import main as process_data
+from entsoe_ai_warriors.process_france import (
+    COL_ACTUAL_LOAD,
+    COL_EXPORT,
+    COL_FORECAST_LOAD,
+    COL_IMPORT,
+    COL_NET_IMPORT,
+    COL_PRICE,
+    PROCESSED_DIR,
+)
 
 # ── Adalan-inspired Theme ─────────────────────────────────────────────────────
 # Palette: corporate blue #2299DD, orange accent #F57C00, clean white/navy tones
@@ -68,10 +78,7 @@ pio.templates.default = "adalan"
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-REFRESH_INTERVAL_SECONDS = 60 * 60  # 1 hour
+REFRESH_INTERVAL_SECONDS = 15 * 60  # 15 minutes
 
 # Energy conversion: 15-min interval MW readings to GWh
 INTERVAL_HOURS = 0.25  # 15 minutes expressed in hours
@@ -83,6 +90,9 @@ logger = logging.getLogger(__name__)
 _refresh_lock = threading.Lock()
 _refresh_in_progress = False
 _refresh_last_error: str | None = None
+_last_data_update: float = 0.0  # timestamp of last successful data refresh
+
+POLL_INTERVAL_SECONDS = 30  # how often each Streamlit session checks for new data
 
 NEIGHBOURS = ["BE", "CH", "DE_LU", "ES", "GB", "IT_NORD"]
 NEIGHBOUR_LABELS = {
@@ -97,18 +107,10 @@ NEIGHBOUR_LABELS = {
 RENEWABLE_TYPES = {"Solar", "Wind Offshore", "Wind Onshore", "Hydro Run-of-river and poundage", "Hydro Water Reservoir"}
 NUCLEAR_TYPES = {"Nuclear"}
 
-# Column name schema — single source of truth for expected CSV columns
-COL_PRICE = "Price"
-COL_ACTUAL_LOAD = "Actual Load"
-COL_FORECAST_LOAD = "Forecasted Load"
-COL_IMPORT = "Import"
-COL_EXPORT = "Export"
-COL_NET_IMPORT = "Net Import"
-
 
 def _refresh_loop() -> None:
-    """Background loop: collect fresh data every hour."""
-    global _refresh_in_progress, _refresh_last_error
+    """Background loop: collect and process fresh data every 15 minutes."""
+    global _refresh_in_progress, _refresh_last_error, _last_data_update
     while True:
         try:
             with _refresh_lock:
@@ -116,8 +118,10 @@ def _refresh_loop() -> None:
                 _refresh_last_error = None
             logger.info("Starting data refresh from ENTSO-E API...")
             collect_data()
+            process_data()
             with _refresh_lock:
                 _refresh_in_progress = False
+                _last_data_update = time.time()
             st.cache_data.clear()
             logger.info("Data refresh completed")
         except Exception as exc:
@@ -153,9 +157,7 @@ def _to_gwh(mw_sum: float) -> float:
 
 @st.cache_data
 def load_prices() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_day_ahead_prices.csv", index_col=0, parse_dates=True)
-    df.columns = [COL_PRICE]
-    df.index.name = "timestamp"
+    df = pd.read_csv(PROCESSED_DIR / "prices.csv", index_col=0, parse_dates=True)
     if df.empty:
         raise ValueError("Price data is empty")
     return df
@@ -163,59 +165,31 @@ def load_prices() -> pd.DataFrame:
 
 @st.cache_data
 def load_load() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_load.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    for col in (COL_ACTUAL_LOAD, COL_FORECAST_LOAD):
-        if col not in df.columns:
-            raise ValueError(f"Load data missing expected column: {col}")
-    if df.empty:
-        raise ValueError("Load data is empty")
-    return df
+    return pd.read_csv(PROCESSED_DIR / "load.csv", index_col=0, parse_dates=True)
 
 
 @st.cache_data
 def load_generation() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_generation_by_type.csv", header=[0, 1], index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    # Keep only "Actual Aggregated" columns and flatten
-    agg_cols = [(t, sub) for t, sub in df.columns if sub == "Actual Aggregated"]
-    if not agg_cols:
-        raise ValueError("Generation data has no 'Actual Aggregated' columns — CSV format may have changed")
-    df_agg = df[agg_cols].copy()
-    df_agg.columns = [t for t, _ in df_agg.columns]
-    if df_agg.empty:
-        raise ValueError("Generation data is empty after filtering")
-    return df_agg
+    return pd.read_csv(PROCESSED_DIR / "generation.csv", index_col=0, parse_dates=True)
 
 
 @st.cache_data
 def load_wind_solar_forecast() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_wind_solar_forecast.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    return df
+    return pd.read_csv(PROCESSED_DIR / "wind_solar_forecast.csv", index_col=0, parse_dates=True)
 
 
 @st.cache_data
 def load_installed_capacity() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_installed_capacity.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    return df
+    return pd.read_csv(PROCESSED_DIR / "installed_capacity.csv", index_col=0, parse_dates=True)
 
 
 @st.cache_data
 def load_crossborder() -> dict[str, pd.DataFrame]:
     flows: dict[str, pd.DataFrame] = {}
     for nb in NEIGHBOURS:
-        export_path = DATA_DIR / f"france_crossborder_FR_to_{nb}.csv"
-        import_path = DATA_DIR / f"france_crossborder_{nb}_to_FR.csv"
-        exp = pd.read_csv(export_path, index_col=0, parse_dates=True)
-        imp = pd.read_csv(import_path, index_col=0, parse_dates=True)
-        exp.columns = [COL_EXPORT]
-        imp.columns = [COL_IMPORT]
-        combined = imp.join(exp, how="outer")
-        combined[COL_NET_IMPORT] = combined[COL_IMPORT] - combined[COL_EXPORT]
-        combined.index.name = "timestamp"
-        flows[nb] = combined
+        flows[nb] = pd.read_csv(
+            PROCESSED_DIR / f"crossborder_{nb}.csv", index_col=0, parse_dates=True
+        )
     return flows
 
 
@@ -235,9 +209,6 @@ st.markdown(
     '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">',
     unsafe_allow_html=True,
 )
-
-# ── Theme selection ──────────────────────────────────────────────────────────
-# Read early so CSS and Plotly template are applied before any chart is drawn.
 
 _text        = "#1A2940"
 _metric_val  = "#2299DD"
@@ -309,15 +280,16 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ── Initial data collection if CSVs are missing ────────────────────────────
+# ── Initial data collection if processed CSVs are missing ──────────────────
 
-_required_csv = DATA_DIR / "france_day_ahead_prices.csv"
+_required_csv = PROCESSED_DIR / "prices.csv"
 if not _required_csv.exists():
     with st.status("Collecting initial data from ENTSO-E API...", expanded=True) as status:
         st.write("First launch detected — downloading 7 days of data. This may take a few minutes.")
-        st.write("Make sure `ENTSOE_API_KEY` is set in your `.env` file or Streamlit secrets.")
+        st.write("Make sure `ENTSOE_API_KEY` is set in your `.env` file.")
         try:
             collect_data()
+            process_data()
             st.cache_data.clear()
             status.update(label="Initial data collection complete!", state="complete")
         except Exception as e:
@@ -345,8 +317,7 @@ except (FileNotFoundError, ValueError) as e:
 # ── Sidebar ─────────────────────────────────────────────────────────────────
 
 st.sidebar.header("Data Refresh")
-# Show file-based last download time (survives app restarts)
-_price_csv = DATA_DIR / "france_day_ahead_prices.csv"
+_price_csv = PROCESSED_DIR / "prices.csv"
 if _price_csv.exists():
     _file_mtime = datetime.fromtimestamp(_price_csv.stat().st_mtime, tz=UTC)
     st.sidebar.text(f"Last data download:\n{_file_mtime:%Y-%m-%d %H:%M} UTC")
@@ -359,7 +330,7 @@ if in_progress:
     st.sidebar.info("Refresh in progress...")
 if last_error:
     st.sidebar.warning(f"Last refresh failed: {last_error}")
-st.sidebar.caption("Data auto-refreshes every hour.")
+st.sidebar.caption("Data auto-refreshes every 15 minutes.")
 st.sidebar.markdown("---")
 st.sidebar.header("Filters")
 
@@ -601,7 +572,6 @@ with tab_load:
 
     st.header("📊 Load Statistics")
 
-    # KPI metrics
     actual = f_load[COL_ACTUAL_LOAD]
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Min Load", f"{actual.min() / 1000:.1f} GW")
@@ -632,7 +602,6 @@ with tab_load:
         ).values
         daily.index = daily.index.strftime("%Y-%m-%d")
         daily.index.name = "Date"
-        # Format MW values
         for c in ["Min_MW", "Max_MW", "Mean_MW"]:
             daily[c] = daily[c].round(0).astype(int)
         daily.columns = ["Min (MW)", "Max (MW)", "Mean (MW)", "Peak Hour"]
@@ -645,8 +614,6 @@ with tab_load:
 
 with tab_gen:
 
-    # ── Stacked area chart ────────────────────────────────────────────────
-
     st.header("🏭 Generation Over Time")
 
     fig_gen_detail = go.Figure()
@@ -658,8 +625,6 @@ with tab_gen:
         ))
     fig_gen_detail.update_layout(yaxis_title="MW", hovermode="x unified", height=500)
     st.plotly_chart(fig_gen_detail, width="stretch", theme=None)
-
-    # ── Donut + Top sources bar ───────────────────────────────────────────
 
     gen_d_col1, gen_d_col2 = st.columns(2)
 
@@ -681,8 +646,6 @@ with tab_gen:
         )
         fig_gen_bar.update_layout(height=500, yaxis=dict(autorange="reversed"))
         st.plotly_chart(fig_gen_bar, width="stretch", theme=None)
-
-    # ── Statistics ────────────────────────────────────────────────────────
 
     st.header("📊 Generation Statistics")
 
@@ -721,8 +684,6 @@ with tab_capacity:
     cap_data = capacity.iloc[0] if len(capacity) > 0 else pd.Series(dtype=float)
     cap_data = cap_data[cap_data > 0].sort_values(ascending=True)
 
-    # ── Bar + Donut ───────────────────────────────────────────────────────
-
     cap_col1, cap_col2 = st.columns(2)
 
     with cap_col1:
@@ -741,12 +702,9 @@ with tab_capacity:
         fig_cap_donut.update_layout(height=500)
         st.plotly_chart(fig_cap_donut, width="stretch", theme=None)
 
-    # ── Capacity vs Average Generation ────────────────────────────────────
-
     st.header("⚙️ Capacity vs Average Generation")
 
     avg_gen_cap = f_gen.mean()
-    # Match types between capacity and generation
     common_types = sorted(set(cap_data.index) & set(avg_gen_cap.index))
     if common_types:
         cap_vs_gen = pd.DataFrame({
@@ -767,8 +725,6 @@ with tab_capacity:
             barmode="group", xaxis_title="MW", height=500, hovermode="y unified",
         )
         st.plotly_chart(fig_cap_vs_gen, width="stretch", theme=None)
-
-    # ── Statistics ────────────────────────────────────────────────────────
 
     st.header("📊 Capacity Statistics")
 
@@ -803,8 +759,6 @@ with tab_capacity:
 
 with tab_windsolar:
 
-    # ── Forecast vs Actual per source ─────────────────────────────────────
-
     st.header("🌿 Forecast vs Actual by Source")
 
     ws_sources = ["Solar", "Wind Onshore", "Wind Offshore"]
@@ -828,14 +782,11 @@ with tab_windsolar:
             fig_ws.update_layout(yaxis_title="MW", hovermode="x unified", height=350)
             st.plotly_chart(fig_ws, width="stretch", theme=None)
 
-    # ── Forecast Error ────────────────────────────────────────────────────
-
     st.header("📉 Forecast Error (Actual - Forecast)")
 
     fig_ws_error = go.Figure()
     for src in ws_sources:
         if src in f_gen.columns and src in f_forecast.columns:
-            # Align indices before subtracting
             common_idx = f_gen.index.intersection(f_forecast.index)
             error = f_gen.loc[common_idx, src] - f_forecast.loc[common_idx, src]
             color = SOURCE_COLORS.get(src)
@@ -846,8 +797,6 @@ with tab_windsolar:
     fig_ws_error.add_hline(y=0, line_dash="dash", line_color=_hline_color, line_width=1)
     fig_ws_error.update_layout(yaxis_title="MW", hovermode="x unified", height=400)
     st.plotly_chart(fig_ws_error, width="stretch", theme=None)
-
-    # ── Daily Profile ─────────────────────────────────────────────────────
 
     st.header("🕐 Average Daily Profile")
 
@@ -866,8 +815,6 @@ with tab_windsolar:
     )
     st.plotly_chart(fig_ws_profile, width="stretch", theme=None)
 
-    # ── Statistics ────────────────────────────────────────────────────────
-
     st.header("📊 Wind & Solar Statistics")
 
     ws_total_gwh = 0
@@ -876,7 +823,6 @@ with tab_windsolar:
         if src in f_gen.columns:
             src_gwh = _to_gwh(f_gen[src].sum())
             ws_total_gwh += src_gwh
-            # Capacity factor
             src_cap = cap_data[src] if src in cap_data.index else 0
             cf = _safe_pct(f_gen[src].mean(), src_cap)
             ws_metrics.append((src, src_gwh, cf))
@@ -905,8 +851,6 @@ with tab_windsolar:
 
 with tab_crossborder:
 
-    # ── Net Imports Over Time (larger) ────────────────────────────────────
-
     st.header("🔀 Net Imports Over Time")
 
     fig_cb_detail = go.Figure()
@@ -921,8 +865,6 @@ with tab_crossborder:
         yaxis_title="MW (positive = import)", hovermode="x unified", height=500,
     )
     st.plotly_chart(fig_cb_detail, width="stretch", theme=None)
-
-    # ── Import & Export per Neighbour (3x2 grid) ─────────────────────────
 
     st.header("📊 Import & Export per Neighbour")
 
@@ -953,8 +895,6 @@ with tab_crossborder:
                 )
                 st.plotly_chart(fig_nb, width="stretch", theme=None)
 
-    # ── Daily Net Import by Neighbour (stacked bar) ──────────────────────
-
     st.header("📅 Daily Net Import by Neighbour")
 
     daily_net_rows = []
@@ -973,8 +913,6 @@ with tab_crossborder:
         )
         fig_daily_net.update_layout(hovermode="x unified", height=500)
         st.plotly_chart(fig_daily_net, width="stretch", theme=None)
-
-    # ── Total Energy Exchanged (grouped bar) ─────────────────────────────
 
     st.header("⚡ Total Energy Exchanged")
 
@@ -997,11 +935,8 @@ with tab_crossborder:
         fig_exchange.update_layout(height=400, hovermode="y unified")
         st.plotly_chart(fig_exchange, width="stretch", theme=None)
 
-    # ── Statistics ────────────────────────────────────────────────────────
-
     st.header("📊 Cross-Border Statistics")
 
-    # Compute per-neighbour totals
     nb_net_gwh = {}
     for nb in NEIGHBOURS:
         df_nb = f_crossborder[nb]
@@ -1017,7 +952,6 @@ with tab_crossborder:
     cbk2.metric("Largest Net Importer", f"{largest_importer} ({nb_net_gwh[largest_importer]:+.1f} GWh)")
     cbk3.metric("Largest Net Exporter", f"{largest_exporter} ({nb_net_gwh[largest_exporter]:+.1f} GWh)")
 
-    # Daily summary table
     st.subheader("Daily Net Import Summary (GWh)")
 
     daily_summary_rows = []
@@ -1035,3 +969,17 @@ with tab_crossborder:
 
     st.markdown("---")
     st.caption("Data source: ENTSO-E Transparency Platform • Dashboard built with Streamlit & Plotly")
+
+# ── Auto-refresh: rerun when new data is available ───────────────────────────
+
+with _refresh_lock:
+    current_update = _last_data_update
+
+if current_update > st.session_state.get("_last_seen_update", 0.0):
+    # New data arrived — update session state and rerun immediately
+    st.session_state._last_seen_update = current_update
+    st.rerun()
+else:
+    # No new data yet — poll again after POLL_INTERVAL_SECONDS
+    time.sleep(POLL_INTERVAL_SECONDS)
+    st.rerun()

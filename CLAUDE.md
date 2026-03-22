@@ -16,7 +16,7 @@ Entsoe-AI-Warriors — ENTSO-E (European Network of Transmission System Operator
 
 - **Runtime:** Python 3.12+, managed with `uv`
 - **Package:** `src/entsoe_ai_warriors/` (Hatch build system)
-- **Data:** `data/` — 17 CSV files with 7 days of French energy data (prices, load, generation, wind/solar forecast, installed capacity, cross-border flows with BE/CH/DE_LU/ES/GB/IT_NORD)
+- **Data:** `data/` — raw CSV files from ENTSO-E API; `data/processed/` — cleaned, analysis-ready CSVs produced by `process_france.py`
 
 ### Skills / Reference docs
 
@@ -36,12 +36,13 @@ Reference `SKILL.md` files are stored under `.claude/` at the project root:
 | File | Purpose |
 |------|---------|
 | `src/entsoe_ai_warriors/client.py` | ENTSO-E API client wrapper (single source of truth for `get_client()`) |
-| `src/entsoe_ai_warriors/collect_france.py` | Data collection script for France (imports `get_client` from `client.py`) |
-| `src/entsoe_ai_warriors/dashboard.py` | Streamlit + Plotly interactive dashboard (with background auto-refresh) |
+| `src/entsoe_ai_warriors/collect_france.py` | **Download** — fetches raw data from ENTSO-E API, saves to `data/` |
+| `src/entsoe_ai_warriors/process_france.py` | **Process** — reads raw CSVs, transforms (flatten multi-headers, compute net imports, rename columns), saves to `data/processed/`; also exports `COL_*` constants and `PROCESSED_DIR` |
+| `src/entsoe_ai_warriors/dashboard.py` | **Render** — reads from `data/processed/`, filters by date, renders all charts; no data transformation |
 
 ### Dashboard tabs
 
-The dashboard has 6 tabs, all using the 1970s retro theme (Plotly template `retro_70s`) and `SOURCE_COLORS` for per-source colouring:
+The dashboard has 6 tabs, all using the Adalan corporate theme (Plotly template `adalan`) and `SOURCE_COLORS` for per-source colouring:
 
 1. **⚡ Overview** — KPIs, day-ahead prices, load actual vs forecast, generation mix (stacked area + donut), renewables forecast vs actual, installed capacity bar, cross-border flows
 2. **🔌 Load Details** — larger actual vs forecast chart, forecast error (fill-to-zero), average daily profile by hour, statistics (min/max/mean/std, histogram, daily summary table)
@@ -50,16 +51,16 @@ The dashboard has 6 tabs, all using the 1970s retro theme (Plotly template `retr
 5. **🌿 Wind & Solar Details** — per-source forecast vs actual (Solar, Wind Onshore, Wind Offshore), forecast error with zero line, hourly daily profile, KPIs with capacity factors, daily GWh pivot table
 6. **🔀 Cross-Border Details** — net imports line chart, per-neighbour import/export/net charts (3x2 grid), daily net import stacked bar, total energy exchanged grouped bar, KPIs (total net GWh, largest importer/exporter), daily net import summary table
 
-### Key constants and helpers (dashboard.py)
+### Key constants and helpers
 
-- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh (used everywhere instead of inline `* 0.25 / 1000`)
-- `_safe_pct()` — division-safe percentage computation (handles zero/NaN denominators)
-- `COL_*` constants — single source of truth for CSV column names (`COL_PRICE`, `COL_ACTUAL_LOAD`, `COL_FORECAST_LOAD`, `COL_IMPORT`, `COL_EXPORT`, `COL_NET_IMPORT`)
-- Data loaders validate non-empty data and expected columns on load
+- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh (dashboard.py)
+- `_safe_pct()` — division-safe percentage computation (dashboard.py)
+- `COL_*` constants — single source of truth for CSV column names, defined in `process_france.py` and imported by `dashboard.py`
+- `PROCESSED_DIR` — path to `data/processed/`, defined in `process_france.py` and imported by `dashboard.py`
 
 ### Background data refresh
 
-The dashboard spawns a daemon thread that calls `collect_france.main()` every hour to keep CSV data fresh. The sidebar displays the last download timestamp (based on CSV file modification time) and shows a warning if the last refresh failed. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
+The dashboard spawns a daemon thread that calls `collect_france.main()` then `process_france.main()` every hour. The sidebar displays the last download timestamp and shows a warning if the last refresh failed. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
 
 ### Error handling
 
@@ -90,4 +91,7 @@ uv run streamlit run src/entsoe_ai_warriors/dashboard.py
 
 # Collect data from ENTSO-E API (requires ENTSOE_API_KEY in .env)
 uv run python -m entsoe_ai_warriors.collect_france
+
+# Process raw CSVs into analysis-ready data
+uv run python -m entsoe_ai_warriors.process_france
 ```
