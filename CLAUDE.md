@@ -53,14 +53,16 @@ The dashboard has 6 tabs, all using the Adalan corporate theme (Plotly template 
 
 ### Key constants and helpers
 
-- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh (dashboard.py)
+- `MW_TO_GWH` / `_to_gwh()` — converts sum of 15-min MW readings to GWh; `INTERVAL_HOURS = 0.25` (15 min), `MW_TO_GWH = INTERVAL_HOURS / 1000` (dashboard.py)
 - `_safe_pct()` — division-safe percentage computation (dashboard.py)
 - `COL_*` constants — single source of truth for CSV column names, defined in `process_france.py` and imported by `dashboard.py`
 - `PROCESSED_DIR` — path to `data/processed/`, defined in `process_france.py` and imported by `dashboard.py`
+- `NEIGHBOURS` — list of 6 neighbour codes `["BE", "CH", "DE_LU", "ES", "GB", "IT_NORD"]`, defined in both `process_france.py` and `dashboard.py`
+- `SOURCE_COLORS` — per-source colour overrides for Solar and Hydro variants; other technologies fall back to `ADALAN_COLORS` palette (dashboard.py)
 
 ### Background data refresh
 
-The dashboard spawns a daemon thread that calls `collect_france.main()` then `process_france.main()` every hour. The sidebar displays the last download timestamp and shows a warning if the last refresh failed. The refresh interval is controlled by `REFRESH_INTERVAL_SECONDS` in `dashboard.py`. Requires `ENTSOE_API_KEY` in `.env`.
+The dashboard spawns a daemon thread that calls `collect_france.main()` then `process_france.main()` every 15 minutes (`REFRESH_INTERVAL_SECONDS = 900`). A second constant `POLL_INTERVAL_SECONDS = 30` controls how often each Streamlit session checks for new data. The sidebar displays the last download timestamp and shows a warning if the last refresh failed. Requires `ENTSOE_API_KEY` in `.env`.
 
 ### Error handling
 
