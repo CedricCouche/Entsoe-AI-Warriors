@@ -738,7 +738,14 @@ st.set_page_config(page_title="Entsoe-AI-Warriors", page_icon="⚡", layout="wid
 st.markdown("""
 <style>
 [data-testid="stSidebar"] { background-color: #1A3A5C; }
-[data-testid="stSidebar"] * { color: #FFFFFF !important; }
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div.stMarkdown,
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 { color: #FFFFFF !important; }
 .stApp { background-color: #F4F7FB; }
 </style>
 """, unsafe_allow_html=True)
@@ -749,6 +756,8 @@ if not (PROCESSED_DIR / "prices.csv").exists():
         try:
             collect_data()
             process_data()
+            with _refresh_lock:
+                _last_data_update = pd.Timestamp.now()
         except Exception as _exc:
             st.error(
                 f"Initial data collection failed: {_exc}\n\n"

@@ -143,7 +143,7 @@ Stories are tagged with their implementation status:
 > As a **user**, I want to see the refresh status in the sidebar (last update timestamp, in-progress indicator, and error warning), so that I know whether the data is current and whether the last refresh succeeded.
 
 **Acceptance criteria:**
-- Sidebar shows timestamp of last successful data download
+- Sidebar shows timestamp of last successful data download (set by both the initial collection and background refresh)
 - Sidebar shows an in-progress indicator while refresh is running
 - Sidebar shows a visible warning banner if the last refresh failed, including the error message
 - Status updates automatically without requiring a page reload
