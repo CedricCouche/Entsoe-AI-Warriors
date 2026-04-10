@@ -1,10 +1,9 @@
-"""Process raw ENTSO-E CSV data into clean, analysis-ready CSVs."""
-
 import logging
-import os
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 PROCESSED_DIR = DATA_DIR / "processed"
@@ -18,107 +17,90 @@ COL_IMPORT = "Import"
 COL_EXPORT = "Export"
 COL_NET_IMPORT = "Net Import"
 
-logger = logging.getLogger(__name__)
-
-
-def process_prices() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_day_ahead_prices.csv", index_col=0, parse_dates=True)
-    df.columns = [COL_PRICE]
-    df.index.name = "timestamp"
-    if df.empty:
-        raise ValueError("Price data is empty")
-    return df
-
-
-def process_load() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_load.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    for col in (COL_ACTUAL_LOAD, COL_FORECAST_LOAD):
-        if col not in df.columns:
-            raise ValueError(f"Load data missing expected column: {col}")
-    if df.empty:
-        raise ValueError("Load data is empty")
-    return df
-
-
-def process_generation() -> pd.DataFrame:
-    df = pd.read_csv(
-        DATA_DIR / "france_generation_by_type.csv",
-        header=[0, 1], index_col=0, parse_dates=True,
-    )
-    df.index.name = "timestamp"
-    agg_cols = [(t, sub) for t, sub in df.columns if sub == "Actual Aggregated"]
-    if not agg_cols:
-        raise ValueError("Generation data has no 'Actual Aggregated' columns — CSV format may have changed")
-    df_agg = df[agg_cols].copy()
-    df_agg.columns = [t for t, _ in df_agg.columns]
-    if df_agg.empty:
-        raise ValueError("Generation data is empty after filtering")
-    return df_agg
-
-
-def process_wind_solar_forecast() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_wind_solar_forecast.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    return df
-
-
-def process_installed_capacity() -> pd.DataFrame:
-    df = pd.read_csv(DATA_DIR / "france_installed_capacity.csv", index_col=0, parse_dates=True)
-    df.index.name = "timestamp"
-    return df
-
-
-def process_crossborder() -> dict[str, pd.DataFrame]:
-    flows: dict[str, pd.DataFrame] = {}
-    for nb in NEIGHBOURS:
-        export_path = DATA_DIR / f"france_crossborder_FR_to_{nb}.csv"
-        import_path = DATA_DIR / f"france_crossborder_{nb}_to_FR.csv"
-        exp = pd.read_csv(export_path, index_col=0, parse_dates=True)
-        imp = pd.read_csv(import_path, index_col=0, parse_dates=True)
-        exp.columns = [COL_EXPORT]
-        imp.columns = [COL_IMPORT]
-        combined = imp.join(exp, how="outer")
-        combined[COL_NET_IMPORT] = combined[COL_IMPORT] - combined[COL_EXPORT]
-        combined.index.name = "timestamp"
-        flows[nb] = combined
-    return flows
-
 
 def main() -> None:
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-    steps = [
-        ("prices", process_prices, "prices.csv"),
-        ("load", process_load, "load.csv"),
-        ("generation", process_generation, "generation.csv"),
-        ("wind_solar_forecast", process_wind_solar_forecast, "wind_solar_forecast.csv"),
-        ("installed_capacity", process_installed_capacity, "installed_capacity.csv"),
-    ]
-
-    succeeded = 0
-    failed = 0
-    for name, fn, filename in steps:
-        try:
-            df = fn()
-            df.to_csv(PROCESSED_DIR / filename)
-            logger.info("Processed %s -> %s", name, filename)
-            succeeded += 1
-        except Exception:
-            failed += 1
-            logger.exception("Failed to process %s", name)
-
+    # Prices
     try:
-        flows = process_crossborder()
-        for nb, df in flows.items():
+        df = pd.read_csv(DATA_DIR / "france_day_ahead_prices.csv", index_col=0, parse_dates=True)
+        if df.empty:
+            raise ValueError("Prices data is empty")
+        df.columns = [COL_PRICE]
+        df.index.name = "timestamp"
+        df.to_csv(PROCESSED_DIR / "prices.csv")
+        logger.info("Processed prices")
+    except Exception:
+        logger.exception("Failed to process prices")
+
+    # Load
+    try:
+        df = pd.read_csv(DATA_DIR / "france_load.csv", index_col=0, parse_dates=True)
+        if df.empty:
+            raise ValueError("Load data is empty")
+        if COL_ACTUAL_LOAD not in df.columns or COL_FORECAST_LOAD not in df.columns:
+            raise ValueError(f"Missing expected load columns. Found: {df.columns.tolist()}")
+        df.index.name = "timestamp"
+        df.to_csv(PROCESSED_DIR / "load.csv")
+        logger.info("Processed load")
+    except Exception:
+        logger.exception("Failed to process load")
+
+    # Generation
+    try:
+        df = pd.read_csv(
+            DATA_DIR / "france_generation_by_type.csv",
+            header=[0, 1], index_col=0, parse_dates=True,
+        )
+        actual_cols = [col for col in df.columns if col[1] == "Actual Aggregated"]
+        if not actual_cols:
+            raise ValueError("No 'Actual Aggregated' columns found in generation data")
+        df = df[actual_cols].copy()
+        df.columns = [col[0] for col in df.columns]
+        if df.empty:
+            raise ValueError("Generation data is empty after filtering")
+        df.index.name = "timestamp"
+        df.to_csv(PROCESSED_DIR / "generation.csv")
+        logger.info("Processed generation")
+    except Exception:
+        logger.exception("Failed to process generation")
+
+    # Wind & solar forecast
+    try:
+        df = pd.read_csv(DATA_DIR / "france_wind_solar_forecast.csv", index_col=0, parse_dates=True)
+        df.index.name = "timestamp"
+        df.to_csv(PROCESSED_DIR / "wind_solar_forecast.csv")
+        logger.info("Processed wind/solar forecast")
+    except Exception:
+        logger.exception("Failed to process wind/solar forecast")
+
+    # Installed capacity
+    try:
+        df = pd.read_csv(DATA_DIR / "france_installed_capacity.csv", index_col=0, parse_dates=True)
+        df.index.name = "timestamp"
+        df.to_csv(PROCESSED_DIR / "installed_capacity.csv")
+        logger.info("Processed installed capacity")
+    except Exception:
+        logger.exception("Failed to process installed capacity")
+
+    # Cross-border flows (per-neighbour failures handled individually)
+    for nb in NEIGHBOURS:
+        try:
+            export_df = pd.read_csv(
+                DATA_DIR / f"france_crossborder_FR_to_{nb}.csv", index_col=0, parse_dates=True
+            )
+            import_df = pd.read_csv(
+                DATA_DIR / f"france_crossborder_{nb}_to_FR.csv", index_col=0, parse_dates=True
+            )
+            export_df.columns = [COL_EXPORT]
+            import_df.columns = [COL_IMPORT]
+            df = import_df.join(export_df, how="outer")
+            df[COL_NET_IMPORT] = df[COL_IMPORT] - df[COL_EXPORT]
+            df.index.name = "timestamp"
             df.to_csv(PROCESSED_DIR / f"crossborder_{nb}.csv")
             logger.info("Processed crossborder %s", nb)
-        succeeded += 1
-    except Exception:
-        failed += 1
-        logger.exception("Failed to process cross-border flows")
-
-    logger.info("Processing done: %d succeeded, %d failed.", succeeded, failed)
+        except Exception:
+            logger.exception("Failed to process crossborder %s", nb)
 
 
 if __name__ == "__main__":
