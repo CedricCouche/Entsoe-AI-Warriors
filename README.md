@@ -9,7 +9,7 @@ Interactive dashboard and data pipeline for French electricity data from the [EN
 - **Generation mix** — stacked area chart and donut breakdown by source (nuclear, wind, solar, hydro, gas, etc.)
 - **Renewables** — wind & solar forecast vs actual generation, plus installed capacity by technology
 - **Cross-border flows** — net imports/exports with 6 neighbours (Belgium, Switzerland, Germany/Luxembourg, Spain, Great Britain, Italy North)
-- **Auto-refresh** — background thread re-fetches data from the ENTSO-E API every 15 minutes; the sidebar shows the last download timestamp
+- **Auto-refresh** — background thread re-fetches data from the ENTSO-E API every 15 minutes; a manual "Refresh now" button is also available in the sidebar; the sidebar always shows the last download timestamp
 
 ## Prerequisites
 
@@ -47,16 +47,19 @@ The dashboard opens in your browser and automatically refreshes data every 15 mi
 uv run python -m entsoe_ai_warriors.collect_france
 ```
 
-This fetches the last 7 days of French energy data and saves 17 CSV files to the `data/` directory.
+This fetches the last 30 days of French energy data and saves 17 CSV files to the `data/` directory.
 
 ## Project structure
 
 ```
 src/entsoe_ai_warriors/
     client.py              # ENTSO-E API client wrapper
-    collect_france.py      # Data collection script
-    dashboard.py           # Streamlit + Plotly dashboard (with background auto-refresh)
-data/                      # CSV files (prices, load, generation, forecasts, cross-border flows)
+    collect_france.py      # Stage 1: fetch raw data from ENTSO-E API → data/
+    process_france.py      # Stage 2: clean and transform raw CSVs → data/processed/
+    dashboard.py           # Stage 3: Streamlit + Plotly dashboard (auto-refresh + manual refresh)
+data/                      # Raw CSV files (prices, load, generation, forecasts, cross-border flows)
+data/processed/            # Analysis-ready CSVs consumed by the dashboard
+tests/                     # pytest test suite
 ```
 
 ## Tech stack

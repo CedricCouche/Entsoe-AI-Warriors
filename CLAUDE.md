@@ -64,6 +64,9 @@ The dashboard has 6 tabs, all using the Adalan corporate theme (Plotly template 
 
 The dashboard spawns a daemon thread that calls `collect_france.main()` then `process_france.main()` every 15 minutes (`REFRESH_INTERVAL_SECONDS = 900`). A second constant `POLL_INTERVAL_SECONDS = 30` controls how often each Streamlit session checks for new data. The sidebar displays the last download timestamp and shows a warning if the last refresh failed. Requires `ENTSOE_API_KEY` in `.env`.
 
+- `_run_manual_refresh()` — spawns an on-demand refresh thread from the sidebar "Refresh now" button; guards against double-trigger via `_refresh_in_progress`
+- `_data_file_mtime()` — returns the modification time of `prices.csv` as a fallback sidebar timestamp when no in-session refresh has occurred yet; ensures the timestamp is always visible on first load
+
 ### Error handling
 
 - `collect_france.main()` wraps each collection step independently — partial failures don't prevent other data from being saved

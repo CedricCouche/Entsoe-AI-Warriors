@@ -24,7 +24,7 @@ NEIGHBOURS = {
 
 def _get_period() -> tuple[pd.Timestamp, pd.Timestamp]:
     now = pd.Timestamp.now(tz="Europe/Paris")
-    start = (now - pd.Timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = (now - pd.Timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0)
     return start, now
 
 

@@ -349,3 +349,50 @@ Stories are tagged with their implementation status:
 
 **US-042** `[DONE]`
 > As a **user**, I want a daily net import summary table, so that I can review cross-border data in tabular form.
+
+---
+
+## Epic 10 — Configuration & UX Improvements
+
+---
+
+**US-047** `[DONE]`
+> As a **user**, I want the sidebar to always show the date and time of the last data download, so that I know how fresh the data is even before any in-session refresh has occurred.
+
+**Acceptance criteria:**
+- The sidebar always shows a "Last download" timestamp, even on first load when no in-session refresh has happened yet
+- When no in-session refresh has occurred, the timestamp is derived from the file modification time of `data/processed/prices.csv`
+- When an in-session refresh has occurred (background or manual), the in-memory `_last_data_update` timestamp takes precedence over the file mtime
+- If neither source is available (no processed data file exists), the sidebar shows "No data yet"
+- The timestamp format is consistent: `YYYY-MM-DD HH:MM:SS`
+
+---
+
+**US-046** `[DONE]`
+> As a **user**, I want a "Refresh now" button in the sidebar, so that I can trigger a full data refresh (download + process + chart reload) on demand without waiting for the automatic 15-minute cycle.
+
+**Acceptance criteria:**
+- A "Refresh now" button is visible in the sidebar
+- Clicking the button triggers `collect_france.main()` followed by `process_france.main()`, exactly as the background refresh does
+- While a refresh is in progress (whether triggered manually or by the background thread), the button is disabled and a spinner or in-progress label is shown
+- On success, the sidebar last-update timestamp updates and all charts reload with fresh data (via `st.cache_data.clear()`)
+- On failure, the sidebar error warning banner displays the error message, consistent with the existing background-refresh error behaviour
+- The button reuses the existing shared-state variables (`_refresh_lock`, `_refresh_in_progress`, `_last_data_update`, `_refresh_last_error`) — no new global state introduced
+
+**Defect (QA):** Criterion — "all charts reload with fresh data after cache clear"
+**Observed:** After `st.cache_data.clear()` (triggered by the manual refresh), all data loaders raise `AttributeError: 'Index' object has no attribute 'tz'`, crashing every chart.
+**Expected:** Loaders return a valid `DatetimeIndex`-indexed DataFrame; `filter_by_date` succeeds.
+**Root cause:** pandas 2.x `read_csv(parse_dates=True)` produces a plain `object` `Index` (not a `DatetimeIndex`) when the CSV contains **mixed UTC offsets** (e.g. `+0100` and `+0200`). This occurs because the 30-day collection window (US-045) now crosses the France DST boundary (UTC+1 → UTC+2, last Sunday of March). The bug was latent before US-046 — the `@st.cache_data` decorators masked it by never re-reading the CSVs.
+**Fix required:** In each data loader in `dashboard.py`, add `df.index = pd.to_datetime(df.index, utc=True)` after `pd.read_csv(...)` to normalise mixed-offset timestamps into a proper UTC `DatetimeIndex`.
+**Regression tests:** `tests/test_dashboard_loaders.py` — 2 tests currently failing, will pass after the fix.
+
+---
+
+**US-045** `[DONE]`
+> As a **user**, I want the dashboard to default to showing the last 30 days of data, so that I can see trends and patterns over a meaningful time horizon without adjusting the date range manually.
+
+**Acceptance criteria:**
+- The default start date in the sidebar date range selector is set to 30 days before today (instead of 7 days)
+- The data collection window in `collect_france.py` is extended to fetch at least 30 days of historical data for all datasets (prices, load, generation, wind/solar forecast, installed capacity, cross-border flows)
+- All charts and tables render correctly across the full 30-day window
+- The user can still manually adjust the date range to any period within the available data

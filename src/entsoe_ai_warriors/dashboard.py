@@ -114,33 +114,78 @@ def _ensure_refresh_thread() -> None:
         st.session_state["refresh_thread_started"] = True
 
 
+def _run_manual_refresh() -> None:
+    global _last_data_update, _refresh_last_error, _refresh_in_progress
+    with _refresh_lock:
+        if _refresh_in_progress:
+            return
+        _refresh_in_progress = True
+
+    def _do() -> None:
+        global _last_data_update, _refresh_last_error, _refresh_in_progress
+        try:
+            collect_data()
+            process_data()
+            with _refresh_lock:
+                _last_data_update = pd.Timestamp.now()
+                _refresh_last_error = None
+            st.cache_data.clear()
+        except Exception as exc:
+            with _refresh_lock:
+                _refresh_last_error = str(exc)
+            logger.exception("Manual refresh failed")
+        finally:
+            with _refresh_lock:
+                _refresh_in_progress = False
+
+    threading.Thread(target=_do, daemon=True).start()
+
+
+def _data_file_mtime() -> pd.Timestamp | None:
+    """Return the modification time of prices.csv as a fallback download timestamp."""
+    p = PROCESSED_DIR / "prices.csv"
+    if p.exists():
+        return pd.Timestamp.fromtimestamp(p.stat().st_mtime)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Data loaders
 # ---------------------------------------------------------------------------
 
 @st.cache_data
 def load_prices() -> pd.DataFrame:
-    return pd.read_csv(PROCESSED_DIR / "prices.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(PROCESSED_DIR / "prices.csv", index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df
 
 
 @st.cache_data
 def load_load() -> pd.DataFrame:
-    return pd.read_csv(PROCESSED_DIR / "load.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(PROCESSED_DIR / "load.csv", index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df
 
 
 @st.cache_data
 def load_generation() -> pd.DataFrame:
-    return pd.read_csv(PROCESSED_DIR / "generation.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(PROCESSED_DIR / "generation.csv", index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df
 
 
 @st.cache_data
 def load_wind_solar_forecast() -> pd.DataFrame:
-    return pd.read_csv(PROCESSED_DIR / "wind_solar_forecast.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(PROCESSED_DIR / "wind_solar_forecast.csv", index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df
 
 
 @st.cache_data
 def load_installed_capacity() -> pd.DataFrame:
-    return pd.read_csv(PROCESSED_DIR / "installed_capacity.csv", index_col=0, parse_dates=True)
+    df = pd.read_csv(PROCESSED_DIR / "installed_capacity.csv", index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True)
+    return df
 
 
 @st.cache_data
@@ -149,7 +194,9 @@ def load_crossborder() -> dict[str, pd.DataFrame]:
     for nb in NEIGHBOURS:
         path = PROCESSED_DIR / f"crossborder_{nb}.csv"
         if path.exists():
-            result[nb] = pd.read_csv(path, index_col=0, parse_dates=True)
+            df = pd.read_csv(path, index_col=0, parse_dates=True)
+            df.index = pd.to_datetime(df.index, utc=True)
+            result[nb] = df
     return result
 
 
@@ -773,7 +820,7 @@ with st.sidebar:
     st.markdown("---")
 
     _today = pd.Timestamp.now().date()
-    _week_ago = (pd.Timestamp.now() - pd.Timedelta(days=7)).date()
+    _week_ago = (pd.Timestamp.now() - pd.Timedelta(days=30)).date()
     start_date = st.date_input("Start date", value=_week_ago)
     end_date = st.date_input("End date", value=_today)
 
@@ -783,10 +830,15 @@ with st.sidebar:
         _err = _refresh_last_error
         _prog = _refresh_in_progress
 
-    if _ts is not None:
-        st.caption(f"Last download: {_ts.strftime('%Y-%m-%d %H:%M:%S')}")
+    _display_ts = _ts if _ts is not None else _data_file_mtime()
+    if _display_ts is not None:
+        st.caption(f"Last download: {_display_ts.strftime('%Y-%m-%d %H:%M:%S')}")
     else:
-        st.caption("No automatic refresh yet")
+        st.caption("No data yet")
+
+    if st.button("🔄 Refresh now", disabled=_prog):
+        _run_manual_refresh()
+        st.rerun()
 
     if _prog:
         st.info("Refreshing data...")
